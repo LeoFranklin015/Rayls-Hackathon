@@ -122,7 +122,6 @@ export default function AgentLog() {
         const data = JSON.parse(e.data);
         const approved = data.finalVerdict;
         setVerdict(approved);
-        setActiveStream(null);
 
         addLog({
           message: approved
@@ -132,13 +131,34 @@ export default function AgentLog() {
           type: approved ? "success" : "error",
         });
 
+        // Don't close — pipeline continues with attestation, tokenize, bridge, list
+        if (!approved) {
+          setActiveStream(null);
+          addLog({ message: "Agent swarm idle — waiting for next request", highlights: ["idle"], type: "system" });
+          es.close();
+        }
+      });
+
+      es.addEventListener("status", (e) => {
+        const data = JSON.parse(e.data);
+        const typeMap: Record<string, "info" | "success" | "warn" | "error" | "system"> = {
+          info: "info",
+          success: "success",
+          warn: "warn",
+          error: "error",
+        };
         addLog({
-          message: "Agent swarm idle — waiting for next request",
-          highlights: ["idle"],
-          type: "system",
+          message: data.message,
+          highlights: [],
+          type: typeMap[data.type] || "info",
         });
 
-        es.close();
+        // Close stream when pipeline finishes
+        if (data.message === "Pipeline complete" || data.type === "error") {
+          setActiveStream(null);
+          addLog({ message: "Agent swarm idle — waiting for next request", highlights: ["idle"], type: "system" });
+          es.close();
+        }
       });
 
       es.onerror = () => {
@@ -217,8 +237,20 @@ export default function AgentLog() {
   );
 }
 
+const PUBLIC_EXPLORER = "https://testnet-explorer.rayls.com/tx/";
+const PRIVACY_EXPLORER = "https://blockscout-privacy-node-5.rayls.com/tx/";
+
 function renderMessage(message: string, highlights: string[]) {
   let html = message;
+
+  // Detect full tx/attestation hashes (0x + 64 hex chars)
+  html = html.replace(/(0x[a-fA-F0-9]{64})/g, (hash) => {
+    const isPrivacy = message.includes("privacy node") || message.includes("Bridge TX");
+    const explorer = isPrivacy ? PRIVACY_EXPLORER : PUBLIC_EXPLORER;
+    const short = hash.slice(0, 10) + "..." + hash.slice(-6);
+    return `<a href="${explorer}${hash}" target="_blank" rel="noopener" class="underline decoration-dotted underline-offset-2 text-white/80 hover:text-white">${short}</a>`;
+  });
+
   highlights.forEach((h) => {
     html = html.replace(h, `<span class="text-white/90">${h}</span>`);
   });

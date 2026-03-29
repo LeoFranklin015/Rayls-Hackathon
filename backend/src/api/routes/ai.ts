@@ -65,9 +65,8 @@ router.get("/evaluate/:evalId/stream", (req, res) => {
 
   const listener = (eventType: string, data: unknown) => {
     res.write(`event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`);
-    if (eventType === "final-verdict") {
-      res.end();
-    }
+    // Don't close on final-verdict — status events continue for tokenize/bridge/list
+    // Client closes when it receives status "Pipeline complete"
   };
 
   evalStore.addListener(evalId, listener);

@@ -57,6 +57,10 @@ export function removeListener(evalId: string, listener: Listener): void {
   listeners.get(evalId)?.delete(listener);
 }
 
+export function emitStatus(evalId: string, message: string, type: "info" | "success" | "warn" | "error" = "info"): void {
+  emit(evalId, "status", { message, type, timestamp: Date.now() });
+}
+
 function emit(evalId: string, eventType: string, data: unknown): void {
   listeners.get(evalId)?.forEach((fn) => fn(eventType, data));
 }

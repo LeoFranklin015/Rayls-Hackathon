@@ -51,7 +51,9 @@ export async function runEvaluation(evalId: string, collateralId: number): Promi
   try {
     log.info(`Starting evaluation ${evalId} for collateral ${collateralId}`);
 
+    store.emitStatus(evalId, `Fetching collateral #${collateralId} from privacy node...`, "info");
     const loanData = await fetchCollateralData(collateralId);
+    store.emitStatus(evalId, `Loaded: ${loanData.colType}, ${loanData.loanAmount} ETH loan, ${loanData.daysElapsed}d elapsed`, "success");
 
     const eval_: EvaluationResult = {
       id: evalId,
@@ -65,7 +67,7 @@ export async function runEvaluation(evalId: string, collateralId: number): Promi
     store.createEvaluation(eval_);
 
     // Step 1: Run Lead Analyst
-    log.info(`[${evalId}] Running Lead Analyst...`);
+    store.emitStatus(evalId, "Running Lead Analyst...", "info");
     const leadResult = await runLeadAnalyst(loanData);
     store.addAgentResult(evalId, leadResult);
     log.info(`[${evalId}] Lead Analyst: ${leadResult.approved ? "APPROVED" : "REJECTED"} (${leadResult.confidence}%)`);
@@ -73,7 +75,7 @@ export async function runEvaluation(evalId: string, collateralId: number): Promi
     const leadAnalysis = `Decision: ${leadResult.approved ? "APPROVE" : "REJECT"} | Confidence: ${leadResult.confidence}% | Reasoning: ${leadResult.reasoning} | Flags: ${leadResult.flags.join(", ") || "none"}`;
 
     // Step 2: Run reviewers in parallel
-    log.info(`[${evalId}] Running 4 reviewer agents in parallel...`);
+    store.emitStatus(evalId, "Running 4 reviewer agents in parallel...", "info");
     const reviewerResults = await Promise.all([
       runComplianceOfficer(loanData, leadAnalysis),
       runValuationAuditor(loanData, leadAnalysis),
@@ -89,16 +91,19 @@ export async function runEvaluation(evalId: string, collateralId: number): Promi
     // Step 3: Compute final verdict (all 5 must approve)
     const allResults = [leadResult, ...reviewerResults];
     const finalVerdict = allResults.every((r) => r.approved);
+    const approvalCount = allResults.filter((r) => r.approved).length;
+    const avgConfidence = Math.round(
+      allResults.reduce((s, r) => s + r.confidence, 0) / allResults.length
+    );
+
+    store.emitStatus(evalId, `Verdict: ${finalVerdict ? "APPROVED" : "REJECTED"} — ${approvalCount}/5 agents, ${avgConfidence}% avg confidence`, finalVerdict ? "success" : "warn");
 
     // Post attestation on-chain
     let attestationUid: string | undefined;
     if (attestationWrite) {
       try {
-        const approvalCount = allResults.filter((r) => r.approved).length;
-        const avgConfidence = Math.round(
-          allResults.reduce((s, r) => s + r.confidence, 0) / allResults.length
-        );
-        // Public chain attestation — no private data, only agent verdicts
+        store.emitStatus(evalId, "Posting attestation to public chain...", "info");
+
         const summary = JSON.stringify({
           agents: allResults.map((r) => ({
             role: r.agent,
@@ -116,6 +121,8 @@ export async function runEvaluation(evalId: string, collateralId: number): Promi
           summary,
         );
 
+        store.emitStatus(evalId, `Attestation TX sent: ${tx.hash}`, "info");
+
         // Poll for receipt (RPC doesn't support filters)
         const provider = attestationWrite.runner?.provider;
         let receipt = null;
@@ -132,25 +139,26 @@ export async function runEvaluation(evalId: string, collateralId: number): Promi
           });
           const parsed = attestLog ? attestationWrite.interface.parseLog(attestLog) : null;
           attestationUid = parsed ? parsed.args[0] : undefined;
+          store.emitStatus(evalId, `Attestation confirmed on-chain: ${attestationUid}`, "success");
         } else {
-          // Tx sent but receipt not confirmed yet — store tx hash as uid
           attestationUid = tx.hash;
+          store.emitStatus(evalId, `Attestation TX pending: ${tx.hash}`, "warn");
         }
 
         log.info(`[${evalId}] Attestation posted: ${attestationUid}`);
       } catch (err: any) {
+        store.emitStatus(evalId, `Attestation failed: ${err.message.slice(0, 80)}`, "error");
         log.warn(`[${evalId}] Failed to post attestation: ${err.message}`);
       }
     }
 
     store.completeEvaluation(evalId, finalVerdict, attestationUid);
-
     log.info(`[${evalId}] Final verdict: ${finalVerdict ? "APPROVED" : "REJECTED"}`);
 
     // Auto-tokenize if approved
     if (finalVerdict && collateralTokenWrite) {
       try {
-        log.info(`[${evalId}] Auto-tokenizing collateral #${collateralId}...`);
+        store.emitStatus(evalId, `Minting 1000 ERC-1155 fractions on privacy node...`, "info");
 
         const c = await collateralRegistryRead!.getCollateral(collateralId);
         const loanAmount = c.loanAmount;
@@ -159,18 +167,16 @@ export async function runEvaluation(evalId: string, collateralId: number): Promi
         const accruedInterest = (loanAmount * BigInt(interest) * BigInt(timeDays)) / (10000n * 365n);
         const totalValue = loanAmount + accruedInterest;
 
-        const avgScore = Math.round(
-          allResults.reduce((s, r) => s + r.confidence, 0) / allResults.length
-        );
-        const adjustedValue = (totalValue * BigInt(avgScore)) / 100n;
+        const adjustedValue = (totalValue * BigInt(avgConfidence)) / 100n;
         const maxTokenCount = 1000n;
 
-        // Mint fractions on privacy chain
         const tokenizeTx = await collateralTokenWrite.tokenize(BigInt(collateralId), maxTokenCount);
         const tokenizeReceipt = await tokenizeTx.wait();
+        store.emitStatus(evalId, `Tokenized on privacy node: ${tokenizeReceipt.hash}`, "success");
         log.info(`[${evalId}] Tokenized: ${tokenizeReceipt.hash}`);
 
         // Bridge to public chain
+        store.emitStatus(evalId, `Bridging 1000 fractions to public chain...`, "info");
         const bridgeTx = await collateralTokenWrite.teleportToPublicChain(
           config.publicChainAddress || publicWallet.address,
           BigInt(collateralId),
@@ -179,11 +185,12 @@ export async function runEvaluation(evalId: string, collateralId: number): Promi
           "0x",
         );
         const bridgeReceipt = await bridgeTx.wait();
+        store.emitStatus(evalId, `Bridge TX confirmed on privacy node: ${bridgeReceipt.hash}`, "success");
         log.info(`[${evalId}] Bridged to public chain: ${bridgeReceipt.hash}`);
 
         // Wait for bridge relay then auto-list on marketplace
         if (marketplaceWrite && config.publicCollateralTokenAddress) {
-          log.info(`[${evalId}] Waiting 35s for bridge relay...`);
+          store.emitStatus(evalId, "Waiting 35s for bridge relay...", "info");
           await new Promise((r) => setTimeout(r, 35000));
 
           try {
@@ -196,17 +203,17 @@ export async function runEvaluation(evalId: string, collateralId: number): Promi
 
             const balance = await mirror.balanceOf(publicWallet.address, collateralId);
             if (balance > 0n) {
-              // Approve marketplace
+              store.emitStatus(evalId, `${balance.toString()} fractions arrived on public chain. Listing on marketplace...`, "success");
+
               const approved = await mirror.isApprovedForAll(publicWallet.address, config.marketplaceAddress);
               if (!approved) {
+                store.emitStatus(evalId, "Approving marketplace for ERC-1155 transfers...", "info");
                 const approveTx = await mirror.setApprovalForAll(config.marketplaceAddress, true);
                 await approveTx.wait();
               }
 
-              // Get price per token from collateral token
               const tc = await collateralTokenRead!.getTokenizedCollateral(collateralId);
 
-              // List on marketplace (assetType 2 = ERC1155)
               const listTx = await marketplaceWrite.list(
                 mirrorAddress,
                 2,
@@ -215,19 +222,26 @@ export async function runEvaluation(evalId: string, collateralId: number): Promi
                 tc.pricePerToken,
               );
               const listReceipt = await listTx.wait();
+              store.emitStatus(evalId, `Listed on marketplace: ${listReceipt.hash} — ${ethers.formatEther(tc.pricePerToken)} USDR/fraction`, "success");
               log.info(`[${evalId}] Auto-listed on marketplace: ${listReceipt.hash}`);
             } else {
+              store.emitStatus(evalId, "Bridge relay pending — fractions not yet on public chain", "warn");
               log.warn(`[${evalId}] No fractions on public chain yet — bridge may still be relaying`);
             }
           } catch (listErr: any) {
+            store.emitStatus(evalId, `Marketplace listing failed: ${listErr.message.slice(0, 80)}`, "error");
             log.warn(`[${evalId}] Auto-list failed: ${listErr.message}`);
           }
         }
+
+        store.emitStatus(evalId, "Pipeline complete", "success");
       } catch (err: any) {
+        store.emitStatus(evalId, `Tokenization failed: ${err.message.slice(0, 80)}`, "error");
         log.warn(`[${evalId}] Auto-tokenize failed: ${err.message}`);
       }
     }
   } catch (err: any) {
+    store.emitStatus(evalId, `Evaluation failed: ${err.message.slice(0, 80)}`, "error");
     log.error(`[${evalId}] Evaluation failed:`, err.message);
     store.completeEvaluation(evalId, false);
   }
