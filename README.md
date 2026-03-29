@@ -12,7 +12,8 @@
 </p>
 
 ---
-![ezgif-593e1373f6dab548](https://github.com/user-attachments/assets/2b9933ed-351a-4ce2-ada5-1621c8a64a5e)
+
+![ezgif-5f36a2a7cf31ddb5](https://github.com/user-attachments/assets/d024774c-8493-4ade-ad2a-4deb8c7dfa3f)
 
 
 ## The Problem
