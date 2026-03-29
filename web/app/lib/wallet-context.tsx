@@ -5,6 +5,7 @@ import {
   useContext,
   useState,
   useCallback,
+  useEffect,
   type ReactNode,
 } from "react";
 import type { SmartAccount } from "viem/account-abstraction";
@@ -17,6 +18,42 @@ import {
 } from "./webauthn";
 import { createSmartAccount } from "./smart-account";
 import { savePasskey } from "./passkey-storage";
+import { addRaylsSubname, getRaylsSubname } from "./ens";
+
+const SESSION_KEY = "colliquid_session";
+
+interface PersistedSession {
+  address: Address;
+  passkeyName: string;
+  passkeyId: string;
+  ensName: string | null;
+}
+
+function loadSession(): PersistedSession | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SESSION_KEY);
+    return raw ? (JSON.parse(raw) as PersistedSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+function persistSession(session: PersistedSession): void {
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch {
+    // silent
+  }
+}
+
+function clearSession(): void {
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch {
+    // silent
+  }
+}
 
 interface WalletState {
   account: SmartAccount | null;
@@ -25,6 +62,7 @@ interface WalletState {
   isConnecting: boolean;
   error: string | null;
   passkeyName: string | null;
+  ensName: string | null;
   connect: (credentialId?: string) => Promise<void>;
   create: (name: string) => Promise<void>;
   disconnect: () => void;
@@ -38,6 +76,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [isConnecting, setIsConnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [passkeyName, setPasskeyName] = useState<string | null>(null);
+  const [ensName, setEnsName] = useState<string | null>(null);
+
+  // Restore session from localStorage on mount
+  useEffect(() => {
+    const session = loadSession();
+    if (session) {
+      setAddress(session.address);
+      setPasskeyName(session.passkeyName);
+      setEnsName(session.ensName);
+    }
+  }, []);
 
   const finalize = useCallback(
     async (credential: PasskeyCredential) => {
@@ -47,6 +96,17 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setAddress(addr);
       setPasskeyName(credential.name);
       savePasskey({ id: credential.id, name: credential.name });
+
+      // Resolve existing ENS subname
+      const existing = await getRaylsSubname(addr);
+      setEnsName(existing);
+
+      persistSession({
+        address: addr,
+        passkeyName: credential.name,
+        passkeyId: credential.id,
+        ensName: existing,
+      });
     },
     []
   );
@@ -75,21 +135,40 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       setError(null);
       try {
         const credential = await createPasskey(name);
-        await finalize(credential);
+        const smartAccount = await createSmartAccount(credential);
+        const addr = await smartAccount.getAddress();
+        setAccount(smartAccount);
+        setAddress(addr);
+        setPasskeyName(credential.name);
+        savePasskey({ id: credential.id, name: credential.name });
+
+        // Mint ENS subname on wallet creation
+        const result = await addRaylsSubname(name, addr);
+        const resolvedName = result.success ? result.subname! : null;
+        setEnsName(resolvedName);
+
+        persistSession({
+          address: addr,
+          passkeyName: credential.name,
+          passkeyId: credential.id,
+          ensName: resolvedName,
+        });
       } catch (e) {
         setError(e instanceof Error ? e.message : "Creation failed");
       } finally {
         setIsConnecting(false);
       }
     },
-    [finalize]
+    []
   );
 
   const disconnect = useCallback(() => {
     setAccount(null);
     setAddress(null);
     setPasskeyName(null);
+    setEnsName(null);
     setError(null);
+    clearSession();
   }, []);
 
   return (
@@ -97,10 +176,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       value={{
         account,
         address,
-        isConnected: !!account,
+        isConnected: !!account || !!address,
         isConnecting,
         error,
         passkeyName,
+        ensName,
         connect,
         create,
         disconnect,

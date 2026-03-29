@@ -1,23 +1,53 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { X, Plus, Fingerprint, Loader2, ChevronDown } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import { X, Plus, Fingerprint, Loader2, ChevronDown, Check, Copy } from "lucide-react";
 import { useWallet } from "../lib/wallet-context";
 import {
   getSavedPasskeys,
   removePasskey,
 } from "../lib/passkey-storage";
 import { fetchPasskeyDisplayNames } from "../lib/webauthn";
+import { isSubnameAvailable } from "../lib/ens";
 import type { SavedPasskey } from "../lib/types";
 
 export default function ConnectWallet() {
-  const { address, isConnected, isConnecting, error, passkeyName, connect, create, disconnect } =
+  const { address, isConnected, isConnecting, error, passkeyName, ensName, connect, create, disconnect } =
     useWallet();
   const [showModal, setShowModal] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [passkeys, setPasskeys] = useState<SavedPasskey[]>([]);
   const [newName, setNewName] = useState("");
   const [view, setView] = useState<"select" | "create">("select");
+  const [nameAvailable, setNameAvailable] = useState<boolean | null>(null);
+  const [checkingName, setCheckingName] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const checkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleCopy = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+
+  // Debounced availability check
+  useEffect(() => {
+    if (checkTimer.current) clearTimeout(checkTimer.current);
+    const trimmed = newName.trim();
+    if (!trimmed || trimmed.length < 2) {
+      setNameAvailable(null);
+      setCheckingName(false);
+      return;
+    }
+    setCheckingName(true);
+    setNameAvailable(null);
+    checkTimer.current = setTimeout(async () => {
+      const available = await isSubnameAvailable(trimmed);
+      setNameAvailable(available);
+      setCheckingName(false);
+    }, 500);
+    return () => { if (checkTimer.current) clearTimeout(checkTimer.current); };
+  }, [newName]);
 
   useEffect(() => {
     if (showModal) {
@@ -77,7 +107,7 @@ export default function ConnectWallet() {
           className="flex cursor-pointer items-center gap-2 rounded-lg bg-card px-3 py-1.5 font-mono text-[12px] text-foreground transition-colors hover:bg-card-warm/50"
         >
           <span className="h-2 w-2 rounded-full bg-success" />
-          {truncated}
+          {ensName || truncated}
           <ChevronDown className="h-3 w-3 text-muted" />
         </button>
 
@@ -91,11 +121,23 @@ export default function ConnectWallet() {
               <div className="px-3 py-2">
                 <p className="text-[11px] text-muted">Connected as</p>
                 <p className="font-mono text-[12px] text-foreground">
-                  {passkeyName || "Passkey"}
+                  {ensName || passkeyName || "Passkey"}
                 </p>
-                <p className="mt-0.5 font-mono text-[10px] text-muted break-all">
-                  {address}
-                </p>
+                <div className="mt-1 flex items-center gap-1.5">
+                  <p className="font-mono text-[10px] text-muted break-all">
+                    {address}
+                  </p>
+                  <button
+                    onClick={() => address && handleCopy(address)}
+                    className="shrink-0 cursor-pointer p-0.5 text-muted-light transition-colors hover:text-foreground"
+                  >
+                    {copied ? (
+                      <Check className="h-3 w-3 text-success" />
+                    ) : (
+                      <Copy className="h-3 w-3" />
+                    )}
+                  </button>
+                </div>
               </div>
               <div className="border-t border-border mt-1 pt-1">
                 <button
@@ -229,20 +271,37 @@ export default function ConnectWallet() {
                     <p className="mb-2 font-mono text-[10px] tracking-[0.15em] text-muted uppercase">
                       Passkey name
                     </p>
-                    <input
-                      type="text"
-                      value={newName}
-                      onChange={(e) => setNewName(e.target.value)}
-                      onKeyDown={(e) => e.key === "Enter" && handleCreate()}
-                      placeholder="e.g. My Laptop"
-                      className="w-full rounded-xl border border-border bg-background px-4 py-3 text-[13px] text-foreground outline-none placeholder:text-muted-light"
-                      autoFocus
-                    />
+                    <div className={`flex items-center rounded-xl border bg-background ${nameAvailable === false ? "border-accent/40" : nameAvailable === true ? "border-success/40" : "border-border"}`}>
+                      <input
+                        type="text"
+                        value={newName}
+                        onChange={(e) => setNewName(e.target.value)}
+                        onKeyDown={(e) => e.key === "Enter" && handleCreate()}
+                        placeholder="e.g. alice"
+                        className="min-w-0 flex-1 bg-transparent px-4 py-3 text-[13px] text-foreground outline-none placeholder:text-muted-light"
+                        autoFocus
+                      />
+                      <span className="shrink-0 pr-1 text-[11px] text-muted">.rayls.eth</span>
+                      <span className="shrink-0 w-6 pr-3 flex items-center justify-center">
+                        {checkingName && (
+                          <Loader2 className="h-3 w-3 animate-spin text-muted" />
+                        )}
+                        {!checkingName && nameAvailable === true && (
+                          <Check className="h-3 w-3 text-success" />
+                        )}
+                        {!checkingName && nameAvailable === false && (
+                          <X className="h-3 w-3 text-accent" />
+                        )}
+                      </span>
+                    </div>
+                    {!checkingName && nameAvailable === false && newName.trim().length >= 2 && (
+                      <p className="mt-1.5 text-[11px] text-accent">Name already taken</p>
+                    )}
                   </div>
 
                   <button
                     onClick={handleCreate}
-                    disabled={!newName.trim() || isConnecting}
+                    disabled={!newName.trim() || isConnecting || nameAvailable === false || checkingName}
                     className="mb-3 flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-card-dark py-3 text-[13px] font-medium text-white transition-opacity hover:opacity-80 disabled:opacity-40"
                   >
                     {isConnecting ? (
