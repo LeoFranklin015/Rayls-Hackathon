@@ -18,10 +18,13 @@ interface PublicListing {
     bankName: string;
     collateralId: string;
     maxTokenCount: string;
-    totalValue: string;   // USDR
+    totalValue: string;
     yieldBasisPoints: number;
     filled: boolean;
     fractionsSold: string;
+    ltv: number;
+    daysElapsed: number;
+    timeDays: number;
   };
 }
 
@@ -39,13 +42,10 @@ function ListingCard({ listing, onClick }: { listing: PublicListing; onClick: ()
       onClick={onClick}
       className="group cursor-pointer rounded-2xl bg-card p-6 text-left transition-colors hover:bg-card-warm/50"
     >
-      {/* ID + type */}
+      {/* ID */}
       <div className="mb-5 flex items-center justify-between">
         <span className="font-mono text-[12px] text-muted">
           Listing #{listing.listingId}
-        </span>
-        <span className="font-mono text-[11px] font-medium text-success">
-          {listing.assetType === 2 ? "ERC-1155" : listing.assetType === 1 ? "ERC-721" : "ERC-20"}
         </span>
       </div>
 
@@ -70,34 +70,62 @@ function ListingCard({ listing, onClick }: { listing: PublicListing; onClick: ()
         </>
       )}
 
-      {/* Key metrics — public data only */}
+      {/* Key metrics — public-safe data */}
       {listing.collateral && (
-        <div className="mt-6 grid grid-cols-3 gap-3 border-t border-border pt-4">
-          <div>
-            <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
-              Yield
-            </p>
-            <p className="font-mono text-[14px] text-foreground">
-              {listing.collateral.yieldBasisPoints / 100}%
-            </p>
+        <>
+          <div className="mt-6 grid grid-cols-3 gap-3 border-t border-border pt-4">
+            <div>
+              <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
+                Yield
+              </p>
+              <p className="font-mono text-[14px] text-foreground">
+                {listing.collateral.yieldBasisPoints / 100}%
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
+                LTV
+              </p>
+              <p className="font-mono text-[14px] text-foreground">
+                {listing.collateral.ltv}%
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
+                Default
+              </p>
+              <p className="font-mono text-[14px] text-foreground">
+                {listing.collateral.daysElapsed}d
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
-              Fractions
-            </p>
-            <p className="font-mono text-[14px] text-foreground">
-              {listing.collateral.maxTokenCount}
-            </p>
+          <div className="mt-3 grid grid-cols-3 gap-3">
+            <div>
+              <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
+                Duration
+              </p>
+              <p className="font-mono text-[14px] text-foreground">
+                {listing.collateral.timeDays}d
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
+                Fractions
+              </p>
+              <p className="font-mono text-[14px] text-foreground">
+                {listing.collateral.maxTokenCount}
+              </p>
+            </div>
+            <div>
+              <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
+                Sold
+              </p>
+              <p className="font-mono text-[14px] text-foreground">
+                {listing.collateral.fractionsSold}
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
-              Sold
-            </p>
-            <p className="font-mono text-[14px] text-foreground">
-              {listing.collateral.fractionsSold}
-            </p>
-          </div>
-        </div>
+        </>
       )}
 
       {/* Status */}
@@ -156,10 +184,10 @@ export default function Marketplace() {
     grade: "-",
     valuation: l.collateral ? formatETH(l.collateral.totalValue) : "-",
     loan: "-",
-    ltv: "-",
-    defaultDays: "-",
+    ltv: l.collateral ? `${l.collateral.ltv}%` : "-",
+    defaultDays: l.collateral ? String(l.collateral.daysElapsed) : "-",
     legalStatus: l.collateral?.filled ? "Filled" : "Active",
-    timeline: "-",
+    timeline: l.collateral ? `${l.collateral.timeDays}d duration` : "-",
     netProceeds: "-",
     issuer: l.collateral?.bankName || "Unknown",
     attestedAgo: "-",

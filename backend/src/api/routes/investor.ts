@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { ethers } from "ethers";
-import { marketplaceRead, collateralTokenRead, redemptionVaultRead } from "../../shared/contracts.js";
+import { marketplaceRead, collateralTokenRead, collateralRegistryRead, redemptionVaultRead } from "../../shared/contracts.js";
+
+const COL_TYPES = ["Land", "House", "Vehicle"] as const;
 
 const router = Router();
 
@@ -36,6 +38,27 @@ router.get("/listings", async (_req, res) => {
               const filled = redemptionVaultRead ? await redemptionVaultRead.isFilled(l.tokenId) : false;
               const fractionsSold = redemptionVaultRead ? await redemptionVaultRead.fractionsSold(l.tokenId) : 0n;
 
+              // Public-safe data from privacy node
+              let ltv = 0;
+              let daysElapsed = 0;
+              let timeDays = 0;
+              if (collateralRegistryRead) {
+                try {
+                  const collateralId = tc.collateralId;
+                  const c = await collateralRegistryRead.getCollateral(collateralId);
+                  if (c.active || c.loanAmount > 0n) {
+                    const loanAmount = c.loanAmount;
+                    const totalVal = tc.totalValue;
+                    ltv = totalVal > 0n ? Math.round(Number((loanAmount * 10000n) / totalVal)) / 100 : 0;
+                    timeDays = Number(c.timeDays);
+                    const now = Math.floor(Date.now() / 1000);
+                    daysElapsed = Math.floor((now - Number(c.startTimestamp)) / 86400);
+                  }
+                } catch (e: any) {
+                  console.warn(`Failed to fetch registry data for collateral ${tc.collateralId}: ${e.message}`);
+                }
+              }
+
               base.collateral = {
                 bankName,
                 collateralId: tc.collateralId.toString(),
@@ -44,6 +67,9 @@ router.get("/listings", async (_req, res) => {
                 yieldBasisPoints: Number(tc.yieldBasisPoints),
                 filled,
                 fractionsSold: fractionsSold.toString(),
+                ltv,
+                daysElapsed,
+                timeDays,
               };
             }
           } catch {
