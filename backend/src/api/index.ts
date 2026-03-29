@@ -7,6 +7,9 @@ import tokenRoutes from "./routes/tokens.js";
 import attestationRoutes from "./routes/attestations.js";
 import marketplaceRoutes from "./routes/marketplace.js";
 import mintRoutes from "./routes/mint.js";
+import collateralRoutes from "./routes/collateral.js";
+import bankRoutes from "./routes/bank.js";
+import investorRoutes from "./routes/investor.js";
 
 const log = createLogger("api");
 
@@ -20,6 +23,9 @@ export function startApi() {
   app.use("/attestations", attestationRoutes);
   app.use("/marketplace", marketplaceRoutes);
   app.use("/mint", mintRoutes);
+  app.use("/collateral", collateralRoutes);
+  app.use("/bank", bankRoutes);
+  app.use("/investor", investorRoutes);
 
   app.listen(config.apiPort, () => {
     log.info(`API server listening on port ${config.apiPort}`);

@@ -38,6 +38,11 @@ export interface MintRequest {
   data?: string;
 }
 
+export interface AppraisalResult {
+  score: number;       // 0-100 (100 = full value)
+  reason: string;
+}
+
 export interface IndexedEvent {
   eventName: string;
   contractAddress: string;

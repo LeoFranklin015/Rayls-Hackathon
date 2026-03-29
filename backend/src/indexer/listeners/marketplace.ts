@@ -39,6 +39,23 @@ export function listenMarketplaceEvents() {
     log.info(`Listing #${listingId} bought by ${buyer} for ${ethers.formatEther(price)} USDR`);
   });
 
+  marketplace.on("BoughtFraction", (listingId: bigint, buyer: string, amount: bigint, totalPrice: bigint, event: any) => {
+    addEvent({
+      eventName: "BoughtFraction",
+      contractAddress: config.marketplaceAddress,
+      blockNumber: event.log.blockNumber,
+      transactionHash: event.log.transactionHash,
+      args: {
+        listingId: listingId.toString(),
+        buyer,
+        amount: amount.toString(),
+        totalPrice: ethers.formatEther(totalPrice),
+      },
+      timestamp: Date.now(),
+    });
+    log.info(`Listing #${listingId}: ${buyer} bought ${amount} fractions for ${ethers.formatEther(totalPrice)} USDR`);
+  });
+
   marketplace.on("Delisted", (listingId: bigint, event: any) => {
     addEvent({
       eventName: "Delisted",

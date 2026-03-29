@@ -32,6 +32,10 @@ export const config = {
   multiTokenAddress: opt("MULTI_TOKEN_ADDRESS", ""),
   attestationAddress: opt("ATTESTATION_ADDRESS", ""),
   marketplaceAddress: opt("MARKETPLACE_ADDRESS", ""),
+  collateralTokenAddress: opt("COLLATERAL_TOKEN_ADDRESS", ""),
+  collateralRegistryAddress: opt("COLLATERAL_REGISTRY_ADDRESS", ""),
+  redemptionVaultAddress: opt("REDEMPTION_VAULT_ADDRESS", ""),
+  publicCollateralTokenAddress: opt("PUBLIC_COLLATERAL_TOKEN_ADDRESS", ""),
 
   // User addresses
   privateChainAddress: opt("PRIVATE_CHAIN_ADDRESS", ""),
