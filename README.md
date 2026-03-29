@@ -1,9 +1,7 @@
 <p align="center">
   <strong>COLLIQUID</strong>
   <br>
-  <em>Frozen assets. Liquid markets.</em>
-  <br>
-  Pre-Liquidation Collateral Tokenization on Rayls
+  <em>Pre-Liquidation Collateral Tokenization on Rayls</em>
 </p>
 
 
@@ -29,18 +27,6 @@ They also can't tokenize it publicly because **borrower privacy laws** (GDPR, LG
 | India | $50B+ |
 
 **Colliquid solves both problems using Rayls privacy chains and AI verification.**
-
----
-
-## The Solution
-
-Colliquid lets a bank tokenize the **right to sale proceeds** -- not the collateral itself.
-
-1. Full borrower file stays locked on the bank's **Rayls Privacy Node** -- sovereign, private, never public
-2. An **AI agent swarm** reads the private data, verifies the claim, and posts only a safe summary to the Public L1
-3. **Share tokens** are issued on Rayls Public L1 -- investors buy fractional exposure at $1,000 per share
-4. When the property sells, proceeds **auto-distribute** to all shareholders atomically
-5. Borrower identity **never touches a public chain**
 
 ---
 
@@ -242,33 +228,23 @@ source .env && forge script script/DeployCollateralRegistry.s.sol --rpc-url $PRI
 
 ---
 
-## Smart Accounts
-
-Banks cannot manage millions of private keys. Traditional approaches fail:
-
-- **Self-custody** -- store keys on a server. One breach = every wallet compromised.
-- **KMS** -- delegate to a Key Management System. One JWT leak = attacker controls everything.
-
-Colliquid replaces private keys with **passkeys** -- the same Face ID and biometric authentication banks already use to approve payments today.
-
-Every bank account is a smart contract. Signed with a passkey. No seed phrases. No private key exposure. The authentication layer banks already trust, now securing every onchain account.
-
----
-
 ## Why Rayls
 
 This product is **impossible on standard public blockchains**. It requires:
 
-- **Privacy Node** -- Each bank has a sovereign EVM chain. Borrower data never leaves it. GDPR compliance is architectural, not procedural.
-- **AI cross-chain attestation** -- The AI agent reads private data on the Privacy Node and posts only the safe summary to the Public L1. No other chain supports this natively.
-- **Bridge + atomic settlement** -- Share tokens cross from private to public. Proceeds settle atomically. One transaction. Sub-second finality on Rayls.
+- **Sovereign privacy per bank** -- each bank controls their own chain
+- **Programmable disclosure** -- the bank decides exactly what crosses to public
+- **Bridge architecture** -- simplified tokens cross, not raw assets
+- **AI as trusted intermediary** -- reads private data, posts only sanitized verdicts
 
-Ethereum mainnet, standard L2s, and other chains do not provide these primitives.
+Rayls provides all four. Ethereum mainnet, standard L2s, and other chains do not.
 
 ---
 
 <p align="center">
-  <strong>"We turned $1.5 trillion in frozen bank collateral into a liquid global market -- without revealing a single borrower's name."</strong>
+  <strong>Colliquid</strong> -- Unlocking $1.5 trillion in idle bank collateral
   <br><br>
   <a href="LICENSE">MIT License</a>
 </p>
+
+
