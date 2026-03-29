@@ -88,6 +88,39 @@ router.get("/evaluations/:collateralId", (req, res) => {
   res.json(evalStore.getEvaluationsByCollateral(collateralId));
 });
 
+// GET /ai/attestations/:collateralId — read attestations from chain
+router.get("/attestations/:collateralId", async (req, res) => {
+  try {
+    const { attestationRead } = await import("../../shared/contracts.js");
+    if (!attestationRead) return res.status(400).json({ error: "ATTESTATION_ADDRESS not configured" });
+
+    const collateralId = Number(req.params.collateralId);
+    const uids: string[] = await attestationRead.getAttestationsByCollateral(collateralId);
+
+    const attestations = await Promise.all(
+      uids.map(async (uid: string) => {
+        const a = await attestationRead!.getAttestation(uid);
+        return {
+          uid: a.uid,
+          collateralId: Number(a.collateralId),
+          approved: a.approved,
+          agentCount: Number(a.agentCount),
+          approvalCount: Number(a.approvalCount),
+          avgConfidence: Number(a.avgConfidence),
+          summary: a.summary,
+          attester: a.attester,
+          timestamp: Number(a.timestamp),
+          revoked: a.revoked,
+        };
+      })
+    );
+
+    res.json(attestations);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // POST /ai/tokenize/:collateralId — tokenize after AI approval
 router.post("/tokenize/:collateralId", async (req, res) => {
   try {
@@ -97,6 +130,15 @@ router.post("/tokenize/:collateralId", async (req, res) => {
     const passing = evalStore.getPassingEvaluation(collateralId);
     if (!passing) {
       return res.status(400).json({ error: "No passing AI evaluation found for this collateral. Run evaluation first." });
+    }
+
+    // Also verify on-chain attestation exists
+    const { attestationRead } = await import("../../shared/contracts.js");
+    if (attestationRead) {
+      const attested = await attestationRead.isAttested(collateralId);
+      if (!attested) {
+        return res.status(400).json({ error: "No on-chain attestation found. Evaluation may not have been recorded." });
+      }
     }
 
     // Forward to the bank tokenize endpoint logic

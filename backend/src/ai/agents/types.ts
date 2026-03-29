@@ -37,4 +37,5 @@ export interface EvaluationResult {
   finalVerdict: boolean;
   status: "running" | "completed";
   createdAt: number;
+  attestationUid?: string;
 }

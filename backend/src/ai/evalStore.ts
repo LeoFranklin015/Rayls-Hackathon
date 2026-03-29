@@ -20,11 +20,12 @@ export function addAgentResult(evalId: string, result: AgentResult): void {
   emit(evalId, "agent-result", result);
 }
 
-export function completeEvaluation(evalId: string, finalVerdict: boolean): void {
+export function completeEvaluation(evalId: string, finalVerdict: boolean, attestationUid?: string): void {
   const eval_ = evaluations.get(evalId);
   if (!eval_) return;
   eval_.finalVerdict = finalVerdict;
   eval_.status = "completed";
+  if (attestationUid) eval_.attestationUid = attestationUid;
   emit(evalId, "final-verdict", eval_);
 }
 

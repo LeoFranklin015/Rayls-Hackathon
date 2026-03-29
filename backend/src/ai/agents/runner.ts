@@ -1,5 +1,5 @@
 import { ethers } from "ethers";
-import { collateralRegistryRead } from "../../shared/contracts.js";
+import { collateralRegistryRead, attestationWrite } from "../../shared/contracts.js";
 import { createLogger } from "../../shared/logger.js";
 import * as store from "../evalStore.js";
 import { runLeadAnalyst } from "./leadAnalyst.js";
@@ -86,7 +86,50 @@ export async function runEvaluation(evalId: string, collateralId: number): Promi
     // Step 3: Compute final verdict (all 5 must approve)
     const allResults = [leadResult, ...reviewerResults];
     const finalVerdict = allResults.every((r) => r.approved);
-    store.completeEvaluation(evalId, finalVerdict);
+
+    // Post attestation on-chain
+    let attestationUid: string | undefined;
+    if (attestationWrite) {
+      try {
+        const approvalCount = allResults.filter((r) => r.approved).length;
+        const avgConfidence = Math.round(
+          allResults.reduce((s, r) => s + r.confidence, 0) / allResults.length
+        );
+        // Public chain attestation — no private data, only agent verdicts
+        const summary = JSON.stringify({
+          agents: allResults.map((r) => ({
+            role: r.agent,
+            approved: r.approved,
+            confidence: r.confidence,
+          })),
+        });
+
+        const tx = await attestationWrite.attest(
+          BigInt(collateralId),
+          finalVerdict,
+          allResults.length,
+          approvalCount,
+          avgConfidence,
+          summary,
+        );
+        const receipt = await tx.wait();
+
+        // Extract UID from Attested event
+        const attestLog = receipt.logs.find((l: any) => {
+          try {
+            return attestationWrite!.interface.parseLog(l)?.name === "Attested";
+          } catch { return false; }
+        });
+        const parsed = attestLog ? attestationWrite.interface.parseLog(attestLog) : null;
+        attestationUid = parsed ? parsed.args[0] : undefined;
+
+        log.info(`[${evalId}] Attestation posted: ${attestationUid}`);
+      } catch (err: any) {
+        log.warn(`[${evalId}] Failed to post attestation: ${err.message}`);
+      }
+    }
+
+    store.completeEvaluation(evalId, finalVerdict, attestationUid);
 
     log.info(`[${evalId}] Final verdict: ${finalVerdict ? "APPROVED" : "REJECTED"}`);
   } catch (err: any) {
