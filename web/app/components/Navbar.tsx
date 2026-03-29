@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import ConnectWallet from "./ConnectWallet";
 
 const links = [
-  { href: "/dashboard", label: "Portfolio" },
+  { href: "/dashboard", label: "Admin Portfolio" },
   { href: "/marketplace", label: "Market" },
 ];
 

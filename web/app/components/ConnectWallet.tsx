@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { X, Plus, Fingerprint, Loader2, ChevronDown, Check, Copy } from "lucide-react";
+import { formatEther } from "viem";
 import { useWallet } from "../lib/wallet-context";
 import {
   getSavedPasskeys,
@@ -22,6 +23,7 @@ export default function ConnectWallet() {
   const [nameAvailable, setNameAvailable] = useState<boolean | null>(null);
   const [checkingName, setCheckingName] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [usdrBalance, setUsdrBalance] = useState<string | null>(null);
   const checkTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCopy = (text: string) => {
@@ -68,6 +70,25 @@ export default function ConnectWallet() {
       }
     }
   }, [showModal]);
+
+  // Fetch USDR balance via server-side proxy to Rayls RPC
+  useEffect(() => {
+    if (!address) return;
+    const fetchBalance = () => {
+      fetch(`/api/balance?address=${address}`)
+        .then((r) => r.json())
+        .then((json) => {
+          const bal = parseFloat(formatEther(BigInt(json.balance)));
+          setUsdrBalance(bal >= 1 ? bal.toFixed(2) : bal.toFixed(4));
+        })
+        .catch((err) => {
+          console.error("Failed to fetch USDR balance:", err);
+          setUsdrBalance("0.0000");
+        });
+    };
+    fetchBalance();
+    if (showDropdown) fetchBalance();
+  }, [address, showDropdown]);
 
   // Close modal on successful connect
   useEffect(() => {
@@ -139,7 +160,13 @@ export default function ConnectWallet() {
                   </button>
                 </div>
               </div>
-              <div className="border-t border-border mt-1 pt-1">
+              <div className="border-t border-border mt-1 pt-1 px-3 py-2">
+                <p className="text-[11px] text-muted">Balance</p>
+                <p className="font-mono text-[14px] font-medium text-foreground">
+                  {usdrBalance !== null ? `${usdrBalance} USDR` : "—"}
+                </p>
+              </div>
+              <div className="border-t border-border pt-1">
                 <button
                   onClick={() => {
                     disconnect();

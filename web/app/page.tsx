@@ -79,10 +79,9 @@ const publicData = [
   { field: "AI valuation", reason: "Aggregate estimate" },
   { field: "LTV ratio", reason: "Standard investor metric" },
   { field: "Default days", reason: "Legal trigger confirmation" },
-  { field: "Enforcement status", reason: "Binary \u2014 underway or not" },
+  { field: "Agent attestation", reason: "Private-chain verified collateral" },
   { field: "Expected timeline", reason: "Investor planning information" },
   { field: "Issuer identity", reason: "Verified institution" },
-  { field: "AI grade", reason: "Risk assessment summary" },
 ];
 
 export default function Home() {

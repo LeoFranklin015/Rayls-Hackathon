@@ -103,7 +103,7 @@ export default function Dashboard() {
   }, [assets]);
 
   const filtered = useMemo(() => {
-    let result = [...assets];
+    let result = [...assets].filter((a) => a.id > 9);
     if (typeFilter !== "All") {
       result = result.filter((a) => a.colType === typeFilter);
     }
@@ -153,7 +153,7 @@ export default function Dashboard() {
               Privacy Node
             </p>
             <h1 className="font-serif text-[36px] font-light tracking-tight text-foreground">
-              Collateral Portfolio
+              Admin Portfolio
             </h1>
           </div>
           <button

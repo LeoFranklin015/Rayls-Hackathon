@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import CollateralModal from "../components/CollateralModal";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
@@ -33,6 +33,89 @@ function formatETH(val: string): string {
   return `${num.toFixed(4)} USDR`;
 }
 
+function ListingCard({ listing, onClick }: { listing: PublicListing; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="group cursor-pointer rounded-2xl bg-card p-6 text-left transition-colors hover:bg-card-warm/50"
+    >
+      {/* ID + type */}
+      <div className="mb-5 flex items-center justify-between">
+        <span className="font-mono text-[12px] text-muted">
+          Listing #{listing.listingId}
+        </span>
+        <span className="font-mono text-[11px] font-medium text-success">
+          {listing.assetType === 2 ? "ERC-1155" : listing.assetType === 1 ? "ERC-721" : "ERC-20"}
+        </span>
+      </div>
+
+      {/* Total value — hero */}
+      {listing.collateral ? (
+        <>
+          <p className="font-serif text-[32px] font-light tracking-tight text-foreground">
+            {formatETH(listing.collateral.totalValue)}
+          </p>
+          <p className="mt-1 font-mono text-[11px] text-muted">
+            {parseInt(listing.amount).toLocaleString()} fractions at {formatETH(listing.price)} each
+          </p>
+        </>
+      ) : (
+        <>
+          <p className="font-serif text-[32px] font-light tracking-tight text-foreground">
+            {formatETH(listing.price)}
+          </p>
+          <p className="mt-1 font-mono text-[11px] text-muted">
+            {parseInt(listing.amount).toLocaleString()} available
+          </p>
+        </>
+      )}
+
+      {/* Key metrics — public data only */}
+      {listing.collateral && (
+        <div className="mt-6 grid grid-cols-3 gap-3 border-t border-border pt-4">
+          <div>
+            <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
+              Yield
+            </p>
+            <p className="font-mono text-[14px] text-foreground">
+              {listing.collateral.yieldBasisPoints / 100}%
+            </p>
+          </div>
+          <div>
+            <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
+              Fractions
+            </p>
+            <p className="font-mono text-[14px] text-foreground">
+              {listing.collateral.maxTokenCount}
+            </p>
+          </div>
+          <div>
+            <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
+              Sold
+            </p>
+            <p className="font-mono text-[14px] text-foreground">
+              {listing.collateral.fractionsSold}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Status */}
+      <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
+        <span className="font-mono text-[11px] text-muted">
+          {listing.collateral?.bankName || "Token"}
+        </span>
+        <div className="flex items-center gap-1.5">
+          <span className={`h-1.5 w-1.5 rounded-full ${listing.collateral?.filled ? "bg-muted" : "bg-success"}`} />
+          <span className={`text-[11px] font-medium ${listing.collateral?.filled ? "text-muted" : "text-success"}`}>
+            {listing.collateral?.filled ? "Filled" : "Active"}
+          </span>
+        </div>
+      </div>
+    </button>
+  );
+}
+
 export default function Marketplace() {
   const [listings, setListings] = useState<PublicListing[]>([]);
   const [loading, setLoading] = useState(true);
@@ -51,18 +134,21 @@ export default function Marketplace() {
       .finally(() => setLoading(false));
   }, []);
 
-  const filtered = useMemo(() => {
-    let result = [...listings].filter((l) => l.active);
-    result.sort((a, b) => {
-      if (sortBy === "amount") return parseInt(b.amount) - parseInt(a.amount);
-      if (sortBy === "price") return parseFloat(b.price) - parseFloat(a.price);
-      // yield
-      const yA = a.collateral?.yieldBasisPoints || 0;
-      const yB = b.collateral?.yieldBasisPoints || 0;
-      return yB - yA;
-    });
-    return result;
-  }, [listings, sortBy]);
+  const sortFn = useCallback((a: PublicListing, b: PublicListing) => {
+    if (sortBy === "amount") return parseInt(b.amount) - parseInt(a.amount);
+    if (sortBy === "price") return parseFloat(b.price) - parseFloat(a.price);
+    const yA = a.collateral?.yieldBasisPoints || 0;
+    const yB = b.collateral?.yieldBasisPoints || 0;
+    return yB - yA;
+  }, [sortBy]);
+
+  const activeListings = useMemo(() => {
+    return [...listings].filter((l) => l.active && !l.collateral?.filled).sort(sortFn);
+  }, [listings, sortFn]);
+
+  const filledListings = useMemo(() => {
+    return [...listings].filter((l) => l.collateral?.filled).sort(sortFn);
+  }, [listings, sortFn]);
 
   const toModalData = (l: PublicListing) => ({
     type: `Listing #${l.listingId}`,
@@ -111,7 +197,7 @@ export default function Marketplace() {
             </select>
 
             <span className="ml-auto text-[13px] text-muted">
-              {filtered.length} listing{filtered.length !== 1 && "s"}
+              {activeListings.length + filledListings.length} listing{activeListings.length + filledListings.length !== 1 && "s"}
             </span>
           </div>
         </div>
@@ -131,94 +217,52 @@ export default function Marketplace() {
           )}
 
           {!loading && !error && (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {filtered.map((listing) => (
-                <button
-                  key={listing.listingId}
-                  onClick={() => setSelected(listing)}
-                  className="group cursor-pointer rounded-2xl bg-card p-6 text-left transition-colors hover:bg-card-warm/50"
-                >
-                  {/* ID + type */}
-                  <div className="mb-5 flex items-center justify-between">
+            <div className="space-y-10">
+              {/* Active Listings */}
+              <div>
+                <div className="mb-4 flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-success" />
+                  <h2 className="font-mono text-[13px] tracking-[0.1em] text-foreground uppercase">
+                    Active
+                  </h2>
+                  <span className="font-mono text-[12px] text-muted">
+                    ({activeListings.length})
+                  </span>
+                </div>
+                {activeListings.length > 0 ? (
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {activeListings.map((listing) => (
+                      <ListingCard key={listing.listingId} listing={listing} onClick={() => setSelected(listing)} />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="py-8 text-center text-[13px] text-muted">No active listings.</p>
+                )}
+              </div>
+
+              {/* Filled Listings */}
+              {filledListings.length > 0 && (
+                <div>
+                  <div className="mb-4 flex items-center gap-2">
+                    <span className="h-2 w-2 rounded-full bg-muted" />
+                    <h2 className="font-mono text-[13px] tracking-[0.1em] text-foreground uppercase">
+                      Filled
+                    </h2>
                     <span className="font-mono text-[12px] text-muted">
-                      Listing #{listing.listingId}
-                    </span>
-                    <span className="font-mono text-[11px] font-medium text-success">
-                      {listing.assetType === 2 ? "ERC-1155" : listing.assetType === 1 ? "ERC-721" : "ERC-20"}
+                      ({filledListings.length})
                     </span>
                   </div>
-
-                  {/* Total value — hero */}
-                  {listing.collateral ? (
-                    <>
-                      <p className="font-serif text-[32px] font-light tracking-tight text-foreground">
-                        {formatETH(listing.collateral.totalValue)}
-                      </p>
-                      <p className="mt-1 font-mono text-[11px] text-muted">
-                        {parseInt(listing.amount).toLocaleString()} fractions at {formatETH(listing.price)} each
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="font-serif text-[32px] font-light tracking-tight text-foreground">
-                        {formatETH(listing.price)}
-                      </p>
-                      <p className="mt-1 font-mono text-[11px] text-muted">
-                        {parseInt(listing.amount).toLocaleString()} available
-                      </p>
-                    </>
-                  )}
-
-                  {/* Key metrics — public data only */}
-                  {listing.collateral && (
-                    <div className="mt-6 grid grid-cols-3 gap-3 border-t border-border pt-4">
-                      <div>
-                        <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
-                          Yield
-                        </p>
-                        <p className="font-mono text-[14px] text-foreground">
-                          {listing.collateral.yieldBasisPoints / 100}%
-                        </p>
-                      </div>
-                      <div>
-                        <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
-                          Fractions
-                        </p>
-                        <p className="font-mono text-[14px] text-foreground">
-                          {listing.collateral.maxTokenCount}
-                        </p>
-                      </div>
-                      <div>
-                        <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
-                          Sold
-                        </p>
-                        <p className="font-mono text-[14px] text-foreground">
-                          {listing.collateral.fractionsSold}
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Status */}
-                  <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
-                    <span className="font-mono text-[11px] text-muted">
-                      {listing.collateral?.bankName || "Token"}
-                    </span>
-                    <div className="flex items-center gap-1.5">
-                      <span className={`h-1.5 w-1.5 rounded-full ${listing.collateral?.filled ? "bg-muted" : "bg-success"}`} />
-                      <span className={`text-[11px] font-medium ${listing.collateral?.filled ? "text-muted" : "text-success"}`}>
-                        {listing.collateral?.filled ? "Filled" : "Active"}
-                      </span>
-                    </div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {filledListings.map((listing) => (
+                      <ListingCard key={listing.listingId} listing={listing} onClick={() => setSelected(listing)} />
+                    ))}
                   </div>
-                </button>
-              ))}
+                </div>
+              )}
 
-              {filtered.length === 0 && !loading && (
-                <div className="col-span-3 py-16 text-center text-[14px] text-muted">
-                  {listings.length === 0
-                    ? "No active listings on the public marketplace."
-                    : "No listings match the selected filters."}
+              {activeListings.length === 0 && filledListings.length === 0 && (
+                <div className="py-16 text-center text-[14px] text-muted">
+                  No listings on the public marketplace.
                 </div>
               )}
             </div>

@@ -337,7 +337,15 @@ export default function CollateralModal({
 
               {txHash && (
                 <p className="mt-2 text-center font-mono text-[11px] text-muted">
-                  TX: {txHash}
+                  TX:{" "}
+                  <a
+                    href={`https://testnet-explorer.rayls.com/tx/${txHash}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-accent underline hover:text-foreground"
+                  >
+                    {txHash.slice(0, 10)}...{txHash.slice(-8)}
+                  </a>
                 </p>
               )}
 
