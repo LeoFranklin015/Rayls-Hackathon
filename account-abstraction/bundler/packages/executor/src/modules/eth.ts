@@ -1,0 +1,744 @@
+import RpcError from "@skandha/types/lib/api/errors/rpc-error";
+import * as RpcErrorCodes from "@skandha/types/lib/api/errors/rpc-error-codes.js";
+import {
+  EstimatedUserOperationGas,
+  UserOperationByHashResponse,
+  UserOperationReceipt,
+} from "@skandha/types/lib/api/interfaces";
+import { IPVGEstimator } from "@skandha/params/lib/types/IPVGEstimator.js";
+import {
+  estimateOptimismPVG,
+  estimateArbitrumPVG,
+  ECDSA_DUMMY_SIGNATURE,
+  estimateMantlePVG,
+  AddressZero,
+} from "@skandha/params/lib/index.js";
+import { Logger } from "@skandha/types/lib/index.js";
+import { PerChainMetrics } from "@skandha/monitoring/lib/index.js";
+import { UserOperation } from "@skandha/types/lib/contracts/UserOperation";
+import { UserOperationStruct } from "@skandha/types/lib/contracts/EPv6/EntryPoint.js";
+import { MempoolEntryStatus } from "@skandha/types/lib/executor";
+import { BlockscoutAPI } from "@skandha/utils/lib/third-party";
+import { PublicClient, Hex, GetTransactionReturnType } from "viem";
+import {
+  UserOpValidationService,
+  MempoolService,
+  EntryPointService,
+} from "../services/index.js";
+import {
+  ExecutionResultAndCallGasLimit,
+  GetNodeAPI,
+  NetworkConfig,
+  SimulateHandleOpResultAndGasLimits,
+} from "../interfaces.js";
+import { EntryPointVersion } from "../services/EntryPointService/interfaces.js";
+import { getUserOpGasLimit } from "../services/BundlingService/utils/index.js";
+import { maxBn, minBn } from "../utils/bignumber.js";
+import { hexlifyUserOp } from "../utils/hexlifyUserop.js";
+import {
+  EstimateUserOperationGasArgs,
+  SendUserOperationGasArgs,
+} from "./interfaces.js";
+import { Skandha } from "./skandha.js";
+
+type BigNumberish = bigint | number | `0x${string}` | `${number}` | string;
+
+export class Eth {
+  private pvgEstimator: IPVGEstimator | null = null;
+  private blockscoutApi: BlockscoutAPI | null = null;
+
+  constructor(
+    private chainId: number,
+    private publicClient: PublicClient,
+    private entryPointService: EntryPointService,
+    private userOpValidationService: UserOpValidationService,
+    private mempoolService: MempoolService,
+    private skandhaModule: Skandha,
+    private config: NetworkConfig,
+    private logger: Logger,
+    private metrics: PerChainMetrics | null,
+    private getNodeAPI: GetNodeAPI = () => null
+  ) {
+    // ["arbitrum", "arbitrumNova"]
+    if ([42161, 42170].includes(this.chainId)) {
+      this.pvgEstimator = estimateArbitrumPVG(this.publicClient);
+    }
+
+    // ["optimism", "optimismGoerli", "base", "ancient8"]
+    if ([10, 420, 8453, 888888888].includes(this.chainId)) {
+      this.pvgEstimator = estimateOptimismPVG(this.publicClient);
+    }
+
+    // mantle, mantle testnet, mantle sepolia
+    if ([5000, 5001, 5003].includes(this.chainId)) {
+      this.pvgEstimator = estimateMantlePVG(this.publicClient);
+    }
+
+    if (this.config.blockscoutUrl) {
+      this.blockscoutApi = new BlockscoutAPI(
+        this.publicClient,
+        this.logger,
+        this.config.blockscoutUrl,
+        this.config.blockscoutApiKeys
+      );
+    }
+  }
+
+  private calcVerificationGasAndCallGasLimit(
+    userOp: UserOperation,
+    executionResult: {
+      preOpGas: bigint;
+      paid: bigint;
+    },
+    gasLimits?: {
+      callGasLimit?: bigint;
+      verificationGasLimit?: bigint;
+      paymasterVerificationGasLimit?: bigint;
+    }
+  ): {
+    verificationGasLimit: bigint;
+    callGasLimit: bigint;
+    paymasterVerificationGasLimit: bigint;
+  } {
+    const verificationGasLimit =
+      gasLimits?.verificationGasLimit ??
+      (BigInt(executionResult.preOpGas - BigInt(userOp.preVerificationGas)) *
+        BigInt(150)) /
+        BigInt(100);
+
+    const calculatedCallGasLimit =
+      gasLimits?.callGasLimit ??
+      executionResult.paid / BigInt(userOp.maxFeePerGas) -
+        executionResult.preOpGas;
+
+    const callGasLimit =
+      calculatedCallGasLimit > BigInt(9000)
+        ? calculatedCallGasLimit
+        : BigInt(9000);
+
+    return {
+      verificationGasLimit,
+      callGasLimit,
+      paymasterVerificationGasLimit:
+        gasLimits?.paymasterVerificationGasLimit ?? BigInt(0),
+    };
+  }
+
+  private markupEstimate(
+    estimate: bigint,
+    percent: bigint,
+    flat: bigint
+  ): bigint {
+    return (
+      (estimate * (BigInt(10000) + percent)) / BigInt(10000) + BigInt(flat)
+    );
+  }
+
+  private async handleSimulationResults(
+    entryPoint: string,
+    estimates: SimulateHandleOpResultAndGasLimits,
+    userOp: UserOperation
+  ): Promise<{
+    callGasLimit: bigint;
+    verificationGas: bigint;
+    verificationGasLimit: bigint;
+    maxFeePerGas: BigNumberish;
+    maxPriorityFeePerGas: BigNumberish;
+    preVerificationGas: bigint;
+    paymasterVerificationGasLimit: bigint;
+    paymasterPostOpGasLimit: bigint;
+  }> {
+    let { callGasLimit, verificationGasLimit, paymasterVerificationGasLimit } =
+      this.calcVerificationGasAndCallGasLimit(
+        userOp,
+        estimates.executionResult,
+        {
+          callGasLimit: estimates.callGasLimit,
+          paymasterVerificationGasLimit:
+            estimates.paymasterVerificationGasLimit,
+          verificationGasLimit: estimates.verificationGasLimit,
+        }
+      );
+
+    let preVerificationGas: BigNumberish =
+      this.entryPointService.calcPreverificationGas(entryPoint, userOp);
+
+    const gasFee = await this.skandhaModule.getGasPrice();
+
+    if (this.pvgEstimator) {
+      userOp.maxFeePerGas = gasFee.maxFeePerGas;
+      userOp.maxPriorityFeePerGas = gasFee.maxPriorityFeePerGas;
+      const data = this.entryPointService.encodeHandleOps(
+        entryPoint,
+        [userOp],
+        AddressZero
+      );
+      preVerificationGas = await this.pvgEstimator(
+        entryPoint,
+        data,
+        preVerificationGas,
+        {
+          contractCreation: Boolean(
+            userOp.factory && userOp.factory.length > 2
+          ),
+          userOp,
+        }
+      );
+    }
+
+    const { maxFeePerGas, maxPriorityFeePerGas } = gasFee;
+
+    let paymasterPostOpGasLimit = BigInt(0);
+
+    if (userOp.paymaster) {
+      paymasterPostOpGasLimit =
+        estimates.executionResult.paymasterPostOpGasLimit;
+      paymasterVerificationGasLimit =
+        estimates.executionResult.paymasterVerificationGasLimit;
+    }
+
+    callGasLimit = this.markupEstimate(
+      callGasLimit,
+      BigInt(this.config.cglMarkupPercent),
+      BigInt(this.config.cglMarkup)
+    );
+    verificationGasLimit = this.markupEstimate(
+      verificationGasLimit,
+      BigInt(this.config.vglMarkupPercent),
+      BigInt(this.config.vglMarkup)
+    );
+    preVerificationGas = this.markupEstimate(
+      BigInt(preVerificationGas),
+      BigInt(this.config.pvgMarkupPercent),
+      BigInt(this.config.pvgMarkup)
+    );
+    paymasterVerificationGasLimit = this.markupEstimate(
+      paymasterVerificationGasLimit,
+      BigInt(this.config.paymasterVglMarkupPercent),
+      BigInt(this.config.paymasterVglMarkup)
+    );
+    paymasterPostOpGasLimit = this.markupEstimate(
+      paymasterPostOpGasLimit,
+      BigInt(this.config.paymasterPoglMarkupPercent),
+      BigInt(this.config.paymasterPoglMarkup)
+    );
+
+    return {
+      callGasLimit,
+      verificationGas: verificationGasLimit,
+      verificationGasLimit,
+      maxFeePerGas,
+      maxPriorityFeePerGas,
+      preVerificationGas,
+      paymasterVerificationGasLimit,
+      paymasterPostOpGasLimit,
+    };
+  }
+
+  /**
+   *
+   * @param userOp a full user-operation struct. All fields MUST be set as hex values. empty bytes block (e.g. empty initCode) MUST be set to "0x"
+   * @param entryPoint the entrypoint address the request should be sent through. this MUST be one of the entry points returned by the supportedEntryPoints rpc call.
+   */
+  async sendUserOperation(args: SendUserOperationGasArgs): Promise<string> {
+    const userOp = args.userOp as unknown as UserOperation;
+    const entryPoint = args.entryPoint.toLowerCase() as Hex;
+    if (!this.validateEntryPoint(entryPoint)) {
+      throw new RpcError("Invalid Entrypoint", RpcErrorCodes.INVALID_REQUEST);
+    }
+
+    if (userOp.eip7702Auth && !this.config.eip7702) {
+      throw new RpcError(
+        "EIP7702 is not supported in this network",
+        RpcErrorCodes.INVALID_USEROP
+      );
+    }
+
+    if (userOp.eip7702Auth) {
+      const valid = await this.userOpValidationService.validateEip7702Auth(
+        userOp.sender,
+        userOp.eip7702Auth
+      );
+
+      if (!valid) {
+        throw new RpcError(
+          "Invalid sender for provided EIP7702 Auth",
+          RpcErrorCodes.INVALID_USEROP
+        );
+      }
+
+      const currentNonce = await this.publicClient.getTransactionCount({
+        address: userOp.sender,
+      });
+
+      if (BigInt(currentNonce) !== BigInt(userOp.eip7702Auth.nonce)) {
+        throw new RpcError(
+          "Invalid sender nonce in eip7702Auth",
+          RpcErrorCodes.VALIDATION_FAILED
+        );
+      }
+      await this.mempoolService.validateEip7702(
+        userOp.sender,
+        userOp.eip7702Auth.address
+      );
+    }
+
+    await this.mempoolService.validateUserOpReplaceability(userOp, entryPoint);
+
+    this.logger.debug("Validating user op before sending to mempool...");
+    if (getUserOpGasLimit(userOp) > BigInt(this.config.userOpGasLimit)) {
+      throw new RpcError(
+        "UserOp's gas limit is too high",
+        RpcErrorCodes.INVALID_USEROP
+      );
+    }
+
+    const userOpHash = await this.entryPointService.getUserOpHash(
+      entryPoint,
+      userOp
+    );
+
+    await this.userOpValidationService.validateGasFee(userOp);
+    const validationResult =
+      await this.userOpValidationService.simulateValidation(userOp, entryPoint);
+    // TODO: fetch aggregator
+    this.logger.debug(
+      "Opcode validation successful. Trying saving in mempool..."
+    );
+
+    await this.mempoolService.addUserOp(
+      userOp,
+      entryPoint,
+      validationResult.returnInfo.prefund,
+      validationResult.senderInfo,
+      validationResult.factoryInfo,
+      validationResult.paymasterInfo,
+      validationResult.aggregatorInfo,
+      userOpHash,
+      validationResult.referencedContracts?.hash
+    );
+    this.logger.debug("Saved in mempool");
+
+    this.metrics?.useropsInMempool.inc();
+
+    try {
+      if (
+        this.entryPointService.getEntryPointVersion(entryPoint) ===
+        EntryPointVersion.SEVEN
+      ) {
+        const nodeApi = this.getNodeAPI();
+        if (nodeApi) {
+          // Get all supported mempools and find the one matching this entry point
+          // Fallback to canonical mempool if supportedMempools is not configured
+          let supportedMempools = this.config.supportedMempools;
+          if (!supportedMempools || supportedMempools.length === 0) {
+            // Fallback to canonical mempool if supportedMempools not configured
+            if (this.config.canonicalMempoolId && this.config.canonicalEntryPoint) {
+              supportedMempools = [
+                {
+                  mempoolId: this.config.canonicalMempoolId,
+                  entryPoint: this.config.canonicalEntryPoint,
+                },
+              ];
+            } else {
+              supportedMempools = [];
+            }
+          }
+          
+          const matchingMempool = supportedMempools.find(
+            (mempool) =>
+              mempool.entryPoint.toLowerCase() === entryPoint.toLowerCase() &&
+              mempool.mempoolId.length > 0
+          );
+
+          if (matchingMempool) {
+            // Publish if:
+            // 1. UserOp belongs to canonical mempool (belongsToCanonicalMempool is true), OR
+            // 2. We're configured to relay ops with whitelisted entities
+            const shouldPublish =
+              validationResult.belongsToCanonicalMempool ||
+              this.config.relayOpsWithWhitelistedEntities;
+
+            if (shouldPublish) {
+              const blockNumber = await this.publicClient.getBlockNumber(); // TODO: fetch blockNumber from simulateValidation
+              await nodeApi.publishVerifiedUserOperationJSON(
+                entryPoint,
+                userOp as UserOperationStruct,
+                blockNumber.toString(),
+                matchingMempool.mempoolId
+              );
+              this.metrics?.useropsSent?.inc();
+            }
+          }
+        }
+      }
+    } catch (err) {
+      this.logger.debug(`Could not send userop over gossipsub: ${err}`);
+    }
+    return userOpHash;
+  }
+
+  /**
+   * Estimate the gas values for a UserOperation. Given UserOperation optionally without gas limits and gas prices, return the needed gas limits.
+   * The signature field is ignored by the wallet, so that the operation will not require user’s approval.
+   * Still, it might require putting a “semi-valid” signature (e.g. a signature in the right length)
+   * @param userOp same as eth_sendUserOperation gas limits (and prices) parameters are optional, but are used if specified
+   * maxFeePerGas and maxPriorityFeePerGas default to zero
+   * @param entryPoint Entry Point
+   * @returns
+   */
+  async estimateUserOperationGas(
+    args: EstimateUserOperationGasArgs
+  ): Promise<EstimatedUserOperationGas> {
+    const { userOp: partialUserOp, entryPoint, stateOverrides } = args;
+    if (!this.validateEntryPoint(entryPoint)) {
+      throw new RpcError("Invalid Entrypoint", RpcErrorCodes.INVALID_REQUEST);
+    }
+
+    const userOp: UserOperation = {
+      ...partialUserOp,
+      callGasLimit: BigInt(10e6),
+      paymasterVerificationGasLimit: BigInt(10e6),
+      paymasterPostOpGasLimit: BigInt(10e6),
+      preVerificationGas: BigInt(0),
+      verificationGasLimit: BigInt(10e6),
+      maxFeePerGas: 1,
+      maxPriorityFeePerGas: 1,
+    };
+
+    if (userOp.eip7702Auth && !this.config.eip7702) {
+      throw new RpcError(
+        "EIP7702 is not supported in this network",
+        RpcErrorCodes.INVALID_USEROP
+      );
+    }
+
+    if (userOp.signature.length <= 2) {
+      userOp.signature = ECDSA_DUMMY_SIGNATURE;
+    }
+
+    // eslint-disable-next-line prefer-const
+    const validateForEstimationResponse =
+      await this.userOpValidationService.validateForEstimation(
+        userOp,
+        entryPoint,
+        stateOverrides
+      );
+
+    if (
+      this.config.pimlicoSimulationsContract &&
+      this.config.epSimulationsContract
+    ) {
+      return await this.handleSimulationResults(
+        entryPoint,
+        validateForEstimationResponse as SimulateHandleOpResultAndGasLimits,
+        userOp
+      );
+    }
+
+    const { returnInfo, callGasLimit: binarySearchCGL } =
+      validateForEstimationResponse as ExecutionResultAndCallGasLimit;
+
+    // eslint-disable-next-line prefer-const
+    let { preOpGas, validAfter, validUntil, paid } = returnInfo;
+
+    const verificationGasLimit = Number(
+      ((BigInt(preOpGas) - BigInt(userOp.preVerificationGas)) *
+        BigInt(10000 + this.config.vglMarkupPercent)) /
+        BigInt(10000) +
+        BigInt(this.config.vglMarkup)
+    );
+
+    const { cglMarkup } = this.config;
+    // calculate callGasLimit based on paid fee
+    const totalGas = BigInt(paid) / BigInt(userOp.maxFeePerGas);
+    const paidFeeCGL = totalGas - BigInt(preOpGas);
+
+    let ethEstimateGas;
+    if (userOp.eip7702Auth) {
+      ethEstimateGas = await this.publicClient
+        .estimateGas({
+          account: entryPoint as `0x${string}`,
+          to: userOp.sender as `0x${string}`,
+          data: userOp.callData as `0x${string}`,
+          authorizationList: [
+            {
+              address: userOp.eip7702Auth.address,
+              chainId: Number(BigInt(userOp.eip7702Auth.chainId)),
+              nonce: Number(BigInt(userOp.eip7702Auth.nonce)),
+              r: userOp.eip7702Auth.r
+                .toString()
+                .replace(/^0x0+(?=\d)/, "0x") as `0x${string}`,
+              s: userOp.eip7702Auth.s
+                .toString()
+                .replace(/^0x0+(?=\d)/, "0x") as `0x${string}`,
+              yParity: userOp.eip7702Auth.yParity === "0x0" ? 0 : 1,
+            },
+          ],
+        })
+        .catch((err) => {
+          // eslint-disable-next-line no-console
+          console.error(err);
+          const message =
+            err.message.match(/reason="(.*?)"/)?.at(1) ?? "execution reverted";
+          throw new RpcError(message, RpcErrorCodes.EXECUTION_REVERTED);
+        });
+    } else {
+      //< checking for execution revert
+      ethEstimateGas = await this.publicClient
+        .estimateGas({
+          account: entryPoint,
+          to: userOp.sender,
+          data: userOp.callData,
+        })
+        .catch((err) => {
+          const message =
+            err.message.match(/reason="(.*?)"/)?.at(1) ?? "execution reverted";
+          throw new RpcError(message, RpcErrorCodes.EXECUTION_REVERTED);
+        });
+      //>
+    }
+
+    let callGasLimit = minBn(BigInt(binarySearchCGL), paidFeeCGL);
+    // check between binary search & paid fee cgl
+    if (userOp.factoryData !== undefined && userOp.factoryData.length <= 2) {
+      await this.publicClient
+        .estimateGas({
+          account: entryPoint,
+          to: userOp.sender,
+          data: userOp.callData,
+          gas: callGasLimit,
+        })
+        .catch((_) => {
+          callGasLimit = maxBn(BigInt(binarySearchCGL), paidFeeCGL);
+        });
+    }
+
+    // check between eth_estimateGas & binary search & paid fee cgl
+    if (userOp.factoryData !== undefined && userOp.factoryData.length <= 2) {
+      const prevCGL = callGasLimit;
+      callGasLimit = minBn(ethEstimateGas, callGasLimit);
+      await this.publicClient
+        .estimateGas({
+          account: entryPoint,
+          to: userOp.sender,
+          data: userOp.callData,
+          gas: callGasLimit,
+        })
+        .catch((_) => {
+          callGasLimit = maxBn(callGasLimit, prevCGL);
+        });
+    }
+
+    callGasLimit =
+      (callGasLimit * BigInt(10000 + this.config.cglMarkupPercent)) /
+        BigInt(10000) +
+      BigInt(cglMarkup || 0);
+
+    this.logger.debug(
+      {
+        callGasLimit,
+        paidFeeCGL,
+        binarySearchCGL,
+        ethEstimateGas,
+      },
+      "estimated CGL"
+    );
+    userOp.callGasLimit = callGasLimit;
+    let preVerificationGas: BigNumberish =
+      this.entryPointService.calcPreverificationGas(entryPoint, userOp);
+    const gasFee = await this.skandhaModule.getGasPrice();
+
+    if (this.pvgEstimator) {
+      userOp.maxFeePerGas = gasFee.maxFeePerGas;
+      userOp.maxPriorityFeePerGas = gasFee.maxPriorityFeePerGas;
+      const data = this.entryPointService.encodeHandleOps(
+        entryPoint,
+        [userOp],
+        AddressZero
+      );
+      preVerificationGas = await this.pvgEstimator(
+        entryPoint,
+        data,
+        preVerificationGas,
+        {
+          contractCreation: Boolean(
+            userOp.factory && userOp.factory.length > 2
+          ),
+          userOp,
+        }
+      );
+    }
+
+    preVerificationGas =
+      (BigInt(preVerificationGas) *
+        BigInt(10000 + this.config.pvgMarkupPercent)) /
+      BigInt(10000);
+
+    this.metrics?.useropsEstimated.inc();
+
+    return {
+      preVerificationGas,
+      verificationGasLimit,
+      verificationGas: verificationGasLimit,
+      validAfter: validAfter ? BigInt(validAfter) : undefined,
+      validUntil: validUntil ? BigInt(validUntil) : undefined,
+      callGasLimit,
+      maxFeePerGas: gasFee.maxFeePerGas,
+      maxPriorityFeePerGas: gasFee.maxPriorityFeePerGas,
+    };
+  }
+
+  /**
+   * Estimates userop gas and validates the signature
+   * @param args same as in sendUserOperation
+   */
+  async estimateUserOperationGasWithSignature(
+    args: SendUserOperationGasArgs
+  ): Promise<EstimatedUserOperationGas> {
+    const userOp = args.userOp;
+    const entryPoint = args.entryPoint.toLowerCase() as Hex;
+    if (!this.validateEntryPoint(entryPoint)) {
+      throw new RpcError("Invalid Entrypoint", RpcErrorCodes.INVALID_REQUEST);
+    }
+
+    const { returnInfo } =
+      await this.userOpValidationService.validateForEstimationWithSignature(
+        userOp,
+        entryPoint
+      );
+    const { preOpGas, validAfter, validUntil } = returnInfo;
+    const callGasLimit = await this.publicClient
+      .estimateGas({
+        account: entryPoint,
+        to: userOp.sender,
+        data: userOp.callData,
+      })
+      .then((b) => Number(b))
+      .catch((err) => {
+        const message =
+          err.message.match(/reason="(.*?)"/)?.at(1) ?? "execution reverted";
+        throw new RpcError(message, RpcErrorCodes.EXECUTION_REVERTED);
+      });
+
+    const verificationGasLimit = Number(BigInt(preOpGas));
+
+    const gasFee = await this.skandhaModule.getGasPrice();
+
+    return {
+      preVerificationGas: this.entryPointService.calcPreverificationGas(
+        entryPoint,
+        userOp
+      ),
+      verificationGasLimit,
+      verificationGas: verificationGasLimit,
+      validAfter: validAfter,
+      validUntil: validUntil,
+      callGasLimit,
+      maxFeePerGas: gasFee.maxFeePerGas,
+      maxPriorityFeePerGas: gasFee.maxPriorityFeePerGas,
+    };
+  }
+
+  /**
+   * Validates UserOp. If the UserOp (sender + entryPoint + nonce) match the existing UserOp in mempool,
+   * validates if new UserOp can replace the old one (gas fees must be higher by at least 10%)
+   * @param userOp same as eth_sendUserOperation
+   * @param entryPoint Entry Point
+   * @returns
+   */
+  async validateUserOp(args: SendUserOperationGasArgs): Promise<boolean> {
+    const userOp = args.userOp;
+    const entryPoint = args.entryPoint.toLowerCase() as Hex;
+    if (!this.validateEntryPoint(entryPoint)) {
+      throw new RpcError("Invalid Entrypoint", RpcErrorCodes.INVALID_REQUEST);
+    }
+    await this.mempoolService.validateUserOpReplaceability(userOp, entryPoint);
+    this.logger.debug(
+      JSON.stringify(
+        await this.userOpValidationService.simulateValidation(
+          userOp,
+          entryPoint
+        ),
+        undefined,
+        2
+      )
+    );
+    return true;
+  }
+
+  /**
+   *
+   * @param hash user op hash
+   * @returns null in case the UserOperation is not yet included in a block, or a full UserOperation,
+   * with the addition of entryPoint, blockNumber, blockHash and transactionHash
+   */
+  async getUserOperationByHash(
+    hash: string
+  ): Promise<UserOperationByHashResponse | null> {
+    const entry = await this.mempoolService.getEntryByHash(hash);
+    if (entry) {
+      if (entry.status < MempoolEntryStatus.Submitted || entry.transaction) {
+        let transaction: GetTransactionReturnType | undefined = undefined;
+        if (entry.transaction) {
+          transaction = await this.publicClient.getTransaction({
+            hash: entry.transaction as Hex,
+          });
+        }
+        return {
+          userOperation: hexlifyUserOp(entry.userOp),
+          entryPoint: entry.entryPoint,
+          transactionHash: transaction?.hash,
+          blockHash: transaction?.blockHash,
+          blockNumber: transaction?.blockNumber,
+        };
+      }
+    }
+    const rpcUserOp = await this.entryPointService.getUserOperationByHash(hash);
+    if (!rpcUserOp && this.blockscoutApi) {
+      return await this.blockscoutApi.getUserOperationByHash(hash);
+    }
+    return rpcUserOp || null;
+  }
+
+  /**
+   *
+   * @param hash user op hash
+   * @returns a UserOperation receipt
+   */
+  async getUserOperationReceipt(
+    hash: string
+  ): Promise<UserOperationReceipt | null> {
+    const rpcUserOp = await this.entryPointService.getUserOperationReceipt(
+      hash
+    );
+    if (!rpcUserOp && this.blockscoutApi) {
+      return await this.blockscoutApi.getUserOperationReceipt(hash);
+    }
+    return rpcUserOp || null;
+  }
+
+  /**
+   * eth_chainId
+   * @returns EIP-155 Chain ID.
+   */
+  async getChainId(): Promise<number> {
+    if (this.chainId == null) {
+      this.chainId = await this.publicClient.getChainId();
+    }
+    return this.chainId;
+  }
+
+  /**
+   * Returns an array of the entryPoint addresses supported by the client
+   * The first element of the array SHOULD be the entryPoint addresses preferred by the client.
+   * @returns Entry points
+   */
+  async getSupportedEntryPoints(): Promise<string[]> {
+    return this.entryPointService.getSupportedEntryPoints();
+  }
+
+  validateEntryPoint(entryPoint: string): boolean {
+    return this.entryPointService.isEntryPointSupported(entryPoint);
+  }
+}

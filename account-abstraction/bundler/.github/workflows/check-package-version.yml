@@ -1,0 +1,36 @@
+name: Check if package version is updated
+
+on:
+  pull_request:
+    branches:
+      - master
+      - develop
+jobs:
+  start:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: 1.2.23
+
+      - name: Check if version has been updated
+        id: check
+        uses: EndBug/version-check@v2.1.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          file-name: ./package.json
+
+      - name: Log when changed
+        if: steps.check.outputs.changed == 'true'
+        run: 'echo "Yayy!! Version change found in commit ${{ steps.check.outputs.commit }}! New version: ${{ steps.check.outputs.version }} (${{ steps.check.outputs.type }})"'
+
+      - name: Dry run Skandha build
+        run: bun install && bun run build && bun run bootstrap
+
+      - name: Log when unchanged
+        if: steps.check.outputs.changed == 'false'
+        run: echo "No version change :/ Please update version in package.json!" && exit 1
