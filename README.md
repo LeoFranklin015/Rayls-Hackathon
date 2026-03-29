@@ -276,3 +276,9 @@ Every dollar of NPL has collateral behind it. Most of that collateral is sitting
 ## The One-Line Pitch
 
 **"We unlocked $1.5 trillion in globally idle bank collateral — a bank tokenizes a pre-liquidation property privately, AI verifies the legal status and valuation without revealing the borrower's name, and global investors get a 60-day secured yield product for $1,000 minimum."**
+
+---
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
