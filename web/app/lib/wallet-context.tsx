@@ -16,7 +16,7 @@ import {
   loginWithPasskey,
   loginWithSpecificPasskey,
 } from "./webauthn";
-import { createSmartAccount } from "./smart-account";
+import { createSmartAccount, restoreSmartAccount } from "./smart-account";
 import { savePasskey } from "./passkey-storage";
 import { addRaylsSubname, getRaylsSubname } from "./ens";
 
@@ -26,6 +26,7 @@ interface PersistedSession {
   address: Address;
   passkeyName: string;
   passkeyId: string;
+  publicKey: `0x${string}`;
   ensName: string | null;
 }
 
@@ -78,13 +79,24 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [passkeyName, setPasskeyName] = useState<string | null>(null);
   const [ensName, setEnsName] = useState<string | null>(null);
 
-  // Restore session from localStorage on mount
+  // Restore session and SmartAccount from localStorage on mount
   useEffect(() => {
     const session = loadSession();
-    if (session) {
-      setAddress(session.address);
-      setPasskeyName(session.passkeyName);
-      setEnsName(session.ensName);
+    if (!session) return;
+
+    setAddress(session.address);
+    setPasskeyName(session.passkeyName);
+    setEnsName(session.ensName);
+
+    // Auto-restore SmartAccount purely from localStorage (no RPC/API calls)
+    if (session.publicKey) {
+      restoreSmartAccount(session.passkeyId, session.publicKey, session.address)
+        .then((smartAccount) => {
+          setAccount(smartAccount);
+        })
+        .catch(() => {
+          // Restore failed — user can manually reconnect
+        });
     }
   }, []);
 
@@ -105,6 +117,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         address: addr,
         passkeyName: credential.name,
         passkeyId: credential.id,
+        publicKey: credential.credential.publicKey,
         ensName: existing,
       });
     },
@@ -151,6 +164,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           address: addr,
           passkeyName: credential.name,
           passkeyId: credential.id,
+          publicKey: credential.credential.publicKey,
           ensName: resolvedName,
         });
       } catch (e) {

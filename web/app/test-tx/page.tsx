@@ -8,7 +8,7 @@ import { formatEther, type Address } from "viem";
 import { Loader2 } from "lucide-react";
 
 export default function TestTx() {
-  const { account, address, isConnected } = useWallet();
+  const { account, address, isConnected, isConnecting } = useWallet();
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("0.001");
   const [balance, setBalance] = useState<string | null>(null);
@@ -109,7 +109,7 @@ export default function TestTx() {
               </div>
               <button
                 onClick={handleSend}
-                disabled={loading || !to}
+                disabled={loading || !to || !account || isConnecting}
                 className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-card-dark py-3 text-[13px] font-medium text-white transition-opacity hover:opacity-80 disabled:opacity-40"
               >
                 {loading && <Loader2 className="h-4 w-4 animate-spin" />}

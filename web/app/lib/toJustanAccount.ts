@@ -55,6 +55,7 @@ export type ToJustanAccountParameters = {
   owners: readonly (Address | LocalAccount | WebAuthnAccount)[];
   ownerIndex?: number | undefined;
   nonce?: bigint | undefined;
+  address?: Address | undefined;
   entryPoint?:
       | {
     abi: typeof entryPoint08Abi;
@@ -132,7 +133,9 @@ export async function toJustanAccount(
   if (!owner) throw new Error('No owner provided')
 
   let accountAddress: Address;
-  if (isEip7702) {
+  if (parameters.address) {
+    accountAddress = parameters.address;
+  } else if (isEip7702) {
     accountAddress = eip7702Account!.address;
   } else {
     accountAddress = await readContract(client, {

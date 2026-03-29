@@ -90,9 +90,6 @@ export default function Home() {
     <div className="flex flex-1 flex-col">
       {/* ── Hero ── */}
       <section className="mx-auto w-full max-w-[1200px] px-8 pt-28 pb-24">
-        <p className="mb-6 font-mono text-[12px] tracking-[0.2em] text-muted uppercase">
-          Rayls EthCC Cannes &mdash; RWA Tokenization Track
-        </p>
 
         <h1 className="font-serif text-[56px] leading-[1.08] font-normal tracking-[-0.02em] text-foreground sm:text-[72px]">
           Turn <span className="text-accent">idle collateral</span>

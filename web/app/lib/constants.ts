@@ -28,7 +28,6 @@ export const CONTRACT_VERSION = "1";
 export const PAYMASTER_URL =
   process.env.NEXT_PUBLIC_PAYMASTER_URL ?? "http://localhost:3000";
 
-export const API_BASE_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "https://api.justaname.id";
+export const API_BASE_URL ="https://api.justaname.id";
 export const API_KEY =
   process.env.NEXT_PUBLIC_API_KEY ?? "VJZaS2Pq14R4r1kIdBPV3NprnMeJGJED";

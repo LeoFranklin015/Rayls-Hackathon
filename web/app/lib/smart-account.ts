@@ -42,6 +42,24 @@ async function findOwnerIndex(
   }
 }
 
+export async function restoreSmartAccount(
+  passkeyId: string,
+  publicKey: `0x${string}`,
+  address: Address,
+  ownerIndex: number = 0
+): Promise<SmartAccount> {
+  const webauthnAccount = toWebAuthnAccount({
+    credential: { id: passkeyId, publicKey },
+  });
+  const publicClient = getPublicClient();
+  return toJustanAccount({
+    client: publicClient,
+    owners: [webauthnAccount],
+    ownerIndex,
+    address,
+  });
+}
+
 export async function createSmartAccount(
   passkeyCredential: PasskeyCredential
 ): Promise<SmartAccount> {
