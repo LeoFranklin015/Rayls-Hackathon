@@ -24,16 +24,18 @@ router.post("/loan", async (req, res) => {
   try {
     if (!collateralRegistryWrite) return res.status(400).json({ error: "COLLATERAL_REGISTRY_ADDRESS not configured" });
 
-    const { ownerId, loanAmount, timeDays, interest, yield_, colType, info } = req.body;
+    const { ownerId, loanAmount, timeDays, interest, yield_, colType, info, startTimestamp } = req.body;
     if (!ownerId || !loanAmount || !timeDays || interest === undefined || yield_ === undefined || colType === undefined || !info) {
       return res.status(400).json({ error: "Required: ownerId, loanAmount, timeDays, interest, yield_, colType (0=Land,1=House,2=Vehicle), info" });
     }
+
+    const ts = startTimestamp ? BigInt(startTimestamp) : BigInt(Math.floor(Date.now() / 1000));
 
     const tx = await collateralRegistryWrite.addCollateral(
       ownerId,
       ethers.parseEther(String(loanAmount)),
       BigInt(timeDays),
-      BigInt(Math.floor(Date.now() / 1000)),
+      ts,
       BigInt(interest),
       BigInt(yield_),
       Number(colType),
