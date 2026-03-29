@@ -192,7 +192,7 @@ export default function Marketplace() {
     issuer: l.collateral?.bankName || "Unknown",
     attestedAgo: "-",
     sharePrice: formatETH(l.price),
-    sharesAvailable: parseInt(l.amount),
+    sharesAvailable: l.collateral?.filled ? 0 : parseInt(l.amount),
     currency: "",
     listingId: l.listingId,
     priceWei: l.priceWei,

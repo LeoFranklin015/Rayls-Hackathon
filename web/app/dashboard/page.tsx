@@ -424,7 +424,7 @@ export default function Dashboard() {
             loan: `${formatValue(selectedAsset.loanAmount)} USDR`,
             ltv: `${selectedAsset.ltv}%`,
             defaultDays: String(selectedAsset.daysElapsed),
-            legalStatus: selectedAsset.tokenized ? "Tokenized" : "Active",
+            legalStatus: selectedAsset.filled ? "Filled" : selectedAsset.tokenized ? "Tokenized" : "Active",
             timeline: `${selectedAsset.timeDays}d loan duration`,
             netProceeds: `${formatValue(selectedAsset.totalValue)} USDR`,
             issuer: "bank.rayls.eth",
