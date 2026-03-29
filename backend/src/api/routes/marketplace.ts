@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { ethers } from "ethers";
-import { marketplaceRead } from "../../shared/contracts.js";
+import { marketplaceRead, marketplaceWrite } from "../../shared/contracts.js";
 
 const router = Router();
 
@@ -45,6 +45,36 @@ router.get("/listings/:id", async (req, res) => {
     });
   } catch (e: any) {
     res.status(400).json({ error: e.message });
+  }
+});
+
+// POST /marketplace/buy — buy fractions via backend wallet
+router.post("/buy", async (req, res) => {
+  try {
+    if (!marketplaceWrite) return res.status(400).json({ error: "MARKETPLACE_ADDRESS not configured" });
+
+    const { listingId, amount } = req.body;
+    if (listingId === undefined || !amount) {
+      return res.status(400).json({ error: "Required: listingId, amount" });
+    }
+
+    // Get listing to calculate cost
+    const l = await marketplaceWrite.getListing(listingId);
+    if (!l.active) return res.status(400).json({ error: "Listing not active" });
+
+    const totalCost = l.price * BigInt(amount);
+
+    const tx = await marketplaceWrite.buyFraction(BigInt(listingId), BigInt(amount), { value: totalCost });
+    const receipt = await tx.wait();
+
+    res.json({
+      listingId: Number(listingId),
+      amount: Number(amount),
+      totalCost: ethers.formatEther(totalCost),
+      txHash: receipt.hash,
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
   }
 });
 

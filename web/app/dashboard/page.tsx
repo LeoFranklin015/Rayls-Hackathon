@@ -1,9 +1,10 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { BrainCircuit } from "lucide-react";
+import { BrainCircuit, Plus } from "lucide-react";
 import AgentLog from "../components/AgentLog";
 import CollateralModal from "../components/CollateralModal";
+import CreateLoanModal from "../components/CreateLoanModal";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
 
@@ -55,12 +56,15 @@ export default function Dashboard() {
   const [error, setError] = useState("");
   const [attestedMap, setAttestedMap] = useState<Record<number, boolean>>({});
   const [showModal, setShowModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Collateral | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [typeFilter, setTypeFilter] = useState<string>("All");
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [sortBy, setSortBy] = useState<SortKey>("daysElapsed");
 
   useEffect(() => {
+    setLoading(true);
     fetch(`${API_BASE}/collateral/all/active`)
       .then((r) => {
         if (!r.ok) throw new Error("Failed to fetch");
@@ -69,7 +73,7 @@ export default function Dashboard() {
       .then((data) => setAssets(data))
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
-  }, []);
+  }, [refreshKey]);
 
   useEffect(() => {
     if (assets.length === 0) return;
@@ -121,13 +125,22 @@ export default function Dashboard() {
     <>
       <div className="flex flex-1 flex-col">
         {/* Header */}
-        <div className="mx-auto w-full max-w-[1200px] px-8 pt-16 pb-6">
-          <p className="mb-1 font-mono text-[12px] tracking-[0.2em] text-muted uppercase">
-            Privacy Node
-          </p>
-          <h1 className="font-serif text-[36px] font-light tracking-tight text-foreground">
-            Collateral Portfolio
-          </h1>
+        <div className="mx-auto w-full max-w-[1200px] px-8 pt-16 pb-6 flex items-end justify-between">
+          <div>
+            <p className="mb-1 font-mono text-[12px] tracking-[0.2em] text-muted uppercase">
+              Privacy Node
+            </p>
+            <h1 className="font-serif text-[36px] font-light tracking-tight text-foreground">
+              Collateral Portfolio
+            </h1>
+          </div>
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex cursor-pointer items-center gap-2 rounded-xl bg-card-dark px-5 py-2.5 text-[13px] font-medium text-white transition-colors hover:bg-card-dark/80"
+          >
+            <Plus className="h-4 w-4" />
+            Register Collateral
+          </button>
         </div>
 
         {/* Stats strip */}
@@ -343,6 +356,13 @@ export default function Dashboard() {
             currency: "USDR",
           }}
           onClose={() => { setShowModal(false); setSelectedAsset(null); }}
+        />
+      )}
+
+      {showCreateModal && (
+        <CreateLoanModal
+          onClose={() => setShowCreateModal(false)}
+          onCreated={() => setRefreshKey((k) => k + 1)}
         />
       )}
     </>
