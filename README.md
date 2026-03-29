@@ -250,6 +250,29 @@ Every dollar of NPL has collateral behind it. Most of that collateral is sitting
 
 ---
 
+## Deployed Contract Addresses
+
+### Privacy Node (Chain ID: 800005)
+
+| Contract | Address |
+|---|---|
+| Philix Token (PHLX) | `0x3bA4C6a5c73D512f50fd808f9ed0E35CF0bcF60f` |
+| Philix NFT (PNFT) | `0x3004c5386dB1b171dd101a218fD09B322a5F09aE` |
+| Multi Token | `0x852D122cFAEBddD4bfa724D3E6d5E3D064457724` |
+| Collateral Token | `0x375Ea700d5917727965A3444bb4fC3BaD4F5Db76` |
+| Redemption Vault | `0x3bA4C6a5c73D512f50fd808f9ed0E35CF0bcF60f` |
+| AI Attestation | `0x9FaD74E00B3326d901770A5203FE8FbA97DfCFAD` |
+| Marketplace | `0x58F1e005650c92A90E879c34c846B95dF6e03343` |
+
+### Public Chain (Chain ID: 7295799)
+
+| Contract | Address |
+|---|---|
+| Collateral Registry | `0x3FA0e60FD69d0eb1a10e904E278D3E5953B42547` |
+| Public Collateral Token | `0x0E09ebc00C02e6f169C8B0D2c107C8C1f6AF7483` |
+
+---
+
 ## The One-Line Pitch
 
 **"We unlocked $1.5 trillion in globally idle bank collateral — a bank tokenizes a pre-liquidation property privately, AI verifies the legal status and valuation without revealing the borrower's name, and global investors get a 60-day secured yield product for $1,000 minimum."**
