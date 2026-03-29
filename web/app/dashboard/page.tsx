@@ -134,7 +134,7 @@ export default function Dashboard() {
         <div className="mx-auto w-full max-w-[1200px] border-t border-b border-border">
           <div className="grid grid-cols-4">
             {[
-              { value: loading ? "..." : `${formatValue(totalValue.toString())} ETH`, label: "Total value" },
+              { value: loading ? "..." : `${formatValue(totalValue.toString())} USDR`, label: "Total value" },
               { value: loading ? "..." : String(assets.length), label: "Assets" },
               { value: loading ? "..." : String(activeCount), label: "Active" },
               { value: loading ? "..." : String(tokenizedCount), label: "Tokenized" },
@@ -329,18 +329,18 @@ export default function Dashboard() {
             type: `${selectedAsset.colType} collateral`,
             location: "-",
             grade: "-",
-            valuation: `${formatValue(selectedAsset.totalValue)} ETH`,
-            loan: `${formatValue(selectedAsset.loanAmount)} ETH`,
+            valuation: `${formatValue(selectedAsset.totalValue)} USDR`,
+            loan: `${formatValue(selectedAsset.loanAmount)} USDR`,
             ltv: `${selectedAsset.ltv}%`,
             defaultDays: String(selectedAsset.daysElapsed),
             legalStatus: selectedAsset.tokenized ? "Tokenized" : "Active",
             timeline: `${selectedAsset.timeDays}d loan duration`,
-            netProceeds: `${formatValue(selectedAsset.totalValue)} ETH`,
+            netProceeds: `${formatValue(selectedAsset.totalValue)} USDR`,
             issuer: "bank.rayls.eth",
             attestedAgo: "-",
             sharePrice: "-",
             sharesAvailable: 0,
-            currency: "ETH",
+            currency: "USDR",
           }}
           onClose={() => { setShowModal(false); setSelectedAsset(null); }}
         />

@@ -11,14 +11,14 @@ interface PublicListing {
   assetType: number;
   tokenId: string;
   amount: string;       // fractions remaining
-  price: string;        // ETH formatted price per fraction
+  price: string;        // USDR formatted price per fraction
   priceWei: string;
   active: boolean;
   collateral?: {
     bankName: string;
     collateralId: string;
     maxTokenCount: string;
-    totalValue: string;   // ETH
+    totalValue: string;   // USDR
     yieldBasisPoints: number;
     filled: boolean;
     fractionsSold: string;
@@ -27,10 +27,10 @@ interface PublicListing {
 
 function formatETH(val: string): string {
   const num = parseFloat(val);
-  if (num >= 1e6) return `${(num / 1e6).toFixed(1)}M ETH`;
-  if (num >= 1e3) return `${(num / 1e3).toFixed(0)}K ETH`;
-  if (num >= 1) return `${num.toFixed(2)} ETH`;
-  return `${num.toFixed(4)} ETH`;
+  if (num >= 1e6) return `${(num / 1e6).toFixed(1)}M USDR`;
+  if (num >= 1e3) return `${(num / 1e3).toFixed(0)}K USDR`;
+  if (num >= 1) return `${num.toFixed(2)} USDR`;
+  return `${num.toFixed(4)} USDR`;
 }
 
 export default function Marketplace() {

@@ -113,7 +113,7 @@ export default function TestTx() {
                 className="flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl bg-card-dark py-3 text-[13px] font-medium text-white transition-opacity hover:opacity-80 disabled:opacity-40"
               >
                 {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-                {loading ? "Sending..." : "Send ETH"}
+                {loading ? "Sending..." : "Send USDR"}
               </button>
             </div>
           </div>

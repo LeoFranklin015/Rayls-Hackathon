@@ -37,8 +37,8 @@ export default function TokenizeButton({ collateralId }: { collateralId: number 
         </p>
         <div className="grid grid-cols-2 gap-2 text-sm text-zinc-700 dark:text-zinc-300">
           <span>Fractions:</span><span className="font-mono">{result.totalFractions}</span>
-          <span>Price/Token:</span><span className="font-mono">{result.pricePerToken} ETH</span>
-          <span>Adjusted Value:</span><span className="font-mono">{result.adjustedValue} ETH</span>
+          <span>Price/Token:</span><span className="font-mono">{result.pricePerToken} USDR</span>
+          <span>Adjusted Value:</span><span className="font-mono">{result.adjustedValue} USDR</span>
           <span>Avg Confidence:</span><span className="font-mono">{result.aiEvaluation.averageConfidence}%</span>
           <span>Tokenize TX:</span><span className="font-mono text-xs break-all">{result.txHashes.tokenize}</span>
           <span>Bridge TX:</span><span className="font-mono text-xs break-all">{result.txHashes.bridge}</span>
