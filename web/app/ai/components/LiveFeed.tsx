@@ -32,6 +32,7 @@ interface EvaluationState {
   agents: Map<string, AgentResult>;
   finalVerdict: boolean | null;
   loanData: any;
+  attestationUid: string | null;
 }
 
 export default function LiveFeed({
@@ -58,6 +59,7 @@ export default function LiveFeed({
             agents: new Map(),
             finalVerdict: null,
             loanData: null,
+            attestationUid: null,
           };
           state.agents.set(result.agent, result);
           next.set(evalId, { ...state, agents: new Map(state.agents) });
@@ -73,9 +75,11 @@ export default function LiveFeed({
             agents: new Map(),
             finalVerdict: null,
             loanData: null,
+            attestationUid: null,
           };
           state.finalVerdict = data.finalVerdict;
           state.loanData = data.loanData;
+          state.attestationUid = data.attestationUid || null;
           next.set(evalId, { ...state });
           return next;
         });
@@ -179,6 +183,18 @@ export default function LiveFeed({
                         state.agents.size
                     )}
                     %
+                  </span>
+                </p>
+              </div>
+            )}
+
+            {/* Attestation UID */}
+            {state?.attestationUid && (
+              <div className="mt-2 text-center">
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  On-chain attestation:{" "}
+                  <span className="font-mono text-zinc-700 dark:text-zinc-300">
+                    {state.attestationUid.slice(0, 10)}...{state.attestationUid.slice(-8)}
                   </span>
                 </p>
               </div>

@@ -1,7 +1,13 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { X, Lock, CheckCircle2, Loader2 } from "lucide-react";
+import { X, Lock, CheckCircle2, Loader2, Wallet } from "lucide-react";
+import { encodeFunctionData, parseEther, type Address } from "viem";
+import { useWallet } from "../lib/wallet-context";
+import { sendTransaction } from "../lib/transactions";
+
+const MARKETPLACE_ADDRESS = (process.env.NEXT_PUBLIC_MARKETPLACE_ADDRESS ||
+  "0x58F1e005650c92A90E879c34c846B95dF6e03343") as Address;
 
 interface CollateralData {
   type: string;
@@ -19,6 +25,9 @@ interface CollateralData {
   sharePrice: string;
   sharesAvailable: number;
   currency: string;
+  // For real buy flow
+  listingId?: number;
+  priceWei?: string;
 }
 
 interface CollateralModalProps {
@@ -28,8 +37,7 @@ interface CollateralModalProps {
 
 const protectedFields = [
   { label: "Borrower identity", reason: "GDPR protected" },
-  { label: "Asset type", reason: "Identification risk" },
-  { label: "Location / address", reason: "Identification risk" },
+  { label: "Exact address", reason: "GDPR protected" },
   { label: "Loan history", reason: "Banking secrecy" },
   { label: "Legal correspondence", reason: "Confidential" },
 ];
@@ -38,10 +46,13 @@ export default function CollateralModal({
   data,
   onClose,
 }: CollateralModalProps) {
-  const [shares, setShares] = useState(10);
+  const [shares, setShares] = useState(1);
   const [buyState, setBuyState] = useState<
-    "idle" | "submitting" | "confirmed"
+    "idle" | "submitting" | "confirmed" | "error"
   >("idle");
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [buyError, setBuyError] = useState<string | null>(null);
+  const wallet = useWallet();
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -61,22 +72,59 @@ export default function CollateralModal({
 
   if (!data) return null;
 
-  const handleBuy = () => {
+  const handleBuy = async () => {
+    // If we have listing data + a connected wallet, do a real transaction
+    if (data.listingId !== undefined && data.priceWei && wallet.account) {
+      setBuyState("submitting");
+      setBuyError(null);
+      try {
+        const calldata = encodeFunctionData({
+          abi: [
+            {
+              name: "buyFraction",
+              type: "function",
+              stateMutability: "payable",
+              inputs: [
+                { name: "listingId", type: "uint256" },
+                { name: "amount", type: "uint256" },
+              ],
+              outputs: [],
+            },
+          ],
+          functionName: "buyFraction",
+          args: [BigInt(data.listingId), BigInt(shares)],
+        });
+
+        const totalWei = BigInt(data.priceWei) * BigInt(shares);
+        const hash = await sendTransaction(
+          wallet.account,
+          MARKETPLACE_ADDRESS,
+          totalWei,
+          calldata
+        );
+        setTxHash(hash);
+        setBuyState("confirmed");
+      } catch (e: any) {
+        setBuyError(e.message || "Transaction failed");
+        setBuyState("error");
+      }
+      return;
+    }
+
+    // Fallback: simulated buy for demo
     setBuyState("submitting");
     setTimeout(() => setBuyState("confirmed"), 1200);
   };
 
-  const total = shares * parseInt(data.sharePrice.replace(/[^0-9]/g, ""));
-
   const attestationRows = [
     { label: "AI valuation", value: data.valuation },
-    { label: "Outstanding loan", value: data.loan },
-    { label: "LTV ratio", value: data.ltv },
-    { label: "Default confirmed", value: `${data.defaultDays} days` },
+    ...(data.loan !== "-" ? [{ label: "Outstanding loan", value: data.loan }] : []),
+    ...(data.ltv !== "-" ? [{ label: "LTV ratio", value: data.ltv }] : []),
+    ...(data.defaultDays !== "-" ? [{ label: "Default confirmed", value: `${data.defaultDays} days` }] : []),
     { label: "Legal status", value: data.legalStatus },
-    { label: "Expected timeline", value: data.timeline },
-    { label: "Net proceeds floor", value: data.netProceeds },
-  ];
+    ...(data.timeline !== "-" ? [{ label: "Expected timeline", value: data.timeline }] : []),
+    ...(data.netProceeds !== "-" ? [{ label: "Net proceeds floor", value: data.netProceeds }] : []),
+  ].filter((r) => r.value && r.value !== "-");
 
   return (
     <div
@@ -94,12 +142,15 @@ export default function CollateralModal({
               <h2 className="text-[17px] font-medium text-foreground">
                 {data.type}
               </h2>
-              <span className="font-mono text-[12px] font-medium text-accent">
-                {data.grade}
-              </span>
+              {data.grade !== "-" && (
+                <span className="font-mono text-[12px] font-medium text-accent">
+                  {data.grade}
+                </span>
+              )}
             </div>
             <p className="mt-1 text-[13px] text-muted">
-              {data.issuer} &middot; AI attested {data.attestedAgo}
+              {data.issuer}
+              {data.attestedAgo !== "-" && <> &middot; AI attested {data.attestedAgo}</>}
             </p>
           </div>
           <button
@@ -111,27 +162,29 @@ export default function CollateralModal({
         </div>
 
         <div className="p-6 space-y-6">
-          {/* AI Attestation */}
-          <div>
-            <p className="mb-3 font-mono text-[11px] tracking-[0.15em] text-muted uppercase">
-              AI attestation &mdash; public data
-            </p>
+          {/* AI Attestation — public data only */}
+          {attestationRows.length > 0 && (
             <div>
-              {attestationRows.map((row, i) => (
-                <div
-                  key={row.label}
-                  className={`flex items-center justify-between py-3 ${
-                    i !== attestationRows.length - 1 ? "border-b border-border" : ""
-                  }`}
-                >
-                  <span className="text-[13px] text-muted">{row.label}</span>
-                  <span className="font-mono text-[13px] text-foreground">
-                    {row.value}
-                  </span>
-                </div>
-              ))}
+              <p className="mb-3 font-mono text-[11px] tracking-[0.15em] text-muted uppercase">
+                AI attestation &mdash; public data
+              </p>
+              <div>
+                {attestationRows.map((row, i) => (
+                  <div
+                    key={row.label}
+                    className={`flex items-center justify-between py-3 ${
+                      i !== attestationRows.length - 1 ? "border-b border-border" : ""
+                    }`}
+                  >
+                    <span className="text-[13px] text-muted">{row.label}</span>
+                    <span className="font-mono text-[13px] text-foreground">
+                      {row.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Protected Data */}
           <div>
@@ -159,73 +212,121 @@ export default function CollateralModal({
           </div>
 
           {/* Buy Section */}
-          <div className="border-t border-border pt-6">
-            <div className="mb-5 grid grid-cols-2 gap-4">
-              <div className="rounded-xl bg-background px-4 py-4 text-center">
-                <p className="text-[11px] text-muted">Share price</p>
-                <p className="mt-1 font-serif text-[24px] font-light text-foreground">
-                  {data.currency}1,000
-                </p>
+          {data.sharesAvailable > 0 && (
+            <div className="border-t border-border pt-6">
+              <div className="mb-5 grid grid-cols-2 gap-4">
+                <div className="rounded-xl bg-background px-4 py-4 text-center">
+                  <p className="text-[11px] text-muted">Price per fraction</p>
+                  <p className="mt-1 font-serif text-[20px] font-light text-foreground">
+                    {data.sharePrice}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-background px-4 py-4 text-center">
+                  <p className="text-[11px] text-muted">Available</p>
+                  <p className="mt-1 font-serif text-[20px] font-light text-foreground">
+                    {data.sharesAvailable.toLocaleString()}
+                  </p>
+                </div>
               </div>
-              <div className="rounded-xl bg-background px-4 py-4 text-center">
-                <p className="text-[11px] text-muted">Available</p>
-                <p className="mt-1 font-serif text-[24px] font-light text-foreground">
-                  {data.sharesAvailable.toLocaleString()}
-                </p>
-              </div>
-            </div>
 
-            <div className="mb-4 flex items-center gap-3">
-              <input
-                type="number"
-                min={1}
-                max={data.sharesAvailable}
-                value={shares}
-                onChange={(e) =>
-                  setShares(
-                    Math.max(
-                      1,
-                      Math.min(data.sharesAvailable, parseInt(e.target.value) || 1)
+              {/* Wallet status */}
+              {!wallet.isConnected && data.listingId !== undefined && (
+                <div className="mb-4 flex items-center gap-2 rounded-xl bg-background p-3">
+                  <Wallet className="h-4 w-4 text-muted" />
+                  <span className="text-[12px] text-muted">
+                    Connect wallet to buy fractions on-chain
+                  </span>
+                  <button
+                    onClick={() => wallet.connect()}
+                    className="ml-auto cursor-pointer rounded-lg bg-card-dark px-3 py-1.5 text-[11px] font-medium text-white hover:bg-card-dark/80"
+                  >
+                    {wallet.isConnecting ? "Connecting..." : "Connect"}
+                  </button>
+                </div>
+              )}
+
+              {wallet.isConnected && (
+                <div className="mb-4 flex items-center gap-2 rounded-xl bg-success-bg p-3">
+                  <Wallet className="h-4 w-4 text-success" />
+                  <span className="text-[12px] text-success">
+                    {wallet.address?.slice(0, 6)}...{wallet.address?.slice(-4)}
+                  </span>
+                  <button
+                    onClick={wallet.disconnect}
+                    className="ml-auto cursor-pointer text-[11px] text-muted hover:text-foreground"
+                  >
+                    Disconnect
+                  </button>
+                </div>
+              )}
+
+              <div className="mb-4 flex items-center gap-3">
+                <input
+                  type="number"
+                  min={1}
+                  max={data.sharesAvailable}
+                  value={shares}
+                  onChange={(e) =>
+                    setShares(
+                      Math.max(
+                        1,
+                        Math.min(data.sharesAvailable, parseInt(e.target.value) || 1)
+                      )
                     )
-                  )
-                }
-                className="w-20 rounded-xl border border-border bg-background px-3 py-2.5 font-mono text-[14px] text-foreground outline-none"
-              />
-              <span className="text-[13px] text-muted">
-                shares &times; {data.currency}1,000 =
-              </span>
-              <span className="font-mono text-[15px] font-medium text-foreground">
-                {data.currency}
-                {total.toLocaleString()}
-              </span>
-            </div>
+                  }
+                  className="w-20 rounded-xl border border-border bg-background px-3 py-2.5 font-mono text-[14px] text-foreground outline-none"
+                />
+                <span className="text-[13px] text-muted">
+                  fractions
+                </span>
+              </div>
 
-            <button
-              onClick={handleBuy}
-              disabled={buyState !== "idle"}
-              className={`flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl py-3 text-[14px] font-medium transition-all ${
-                buyState === "confirmed"
-                  ? "bg-success/10 text-success"
-                  : buyState === "submitting"
-                    ? "bg-background text-muted"
-                    : "bg-card-dark text-white hover:opacity-80"
-              } ${buyState !== "idle" ? "cursor-not-allowed" : ""}`}
-            >
-              {buyState === "idle" && "Buy shares"}
-              {buyState === "submitting" && (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Submitting transaction...
-                </>
+              <button
+                onClick={handleBuy}
+                disabled={buyState === "submitting" || buyState === "confirmed"}
+                className={`flex w-full cursor-pointer items-center justify-center gap-2 rounded-xl py-3 text-[14px] font-medium transition-all ${
+                  buyState === "confirmed"
+                    ? "bg-success/10 text-success"
+                    : buyState === "error"
+                      ? "bg-warning-bg text-warning"
+                      : buyState === "submitting"
+                        ? "bg-background text-muted"
+                        : "bg-card-dark text-white hover:opacity-80"
+                } ${buyState === "submitting" || buyState === "confirmed" ? "cursor-not-allowed" : ""}`}
+              >
+                {buyState === "idle" && (
+                  wallet.isConnected && data.listingId !== undefined
+                    ? "Buy fractions on-chain"
+                    : "Buy fractions"
+                )}
+                {buyState === "submitting" && (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Submitting transaction...
+                  </>
+                )}
+                {buyState === "confirmed" && (
+                  <>
+                    <CheckCircle2 className="h-4 w-4" />
+                    Transaction confirmed
+                  </>
+                )}
+                {buyState === "error" && "Retry"}
+              </button>
+
+              {txHash && (
+                <p className="mt-2 text-center font-mono text-[11px] text-muted">
+                  TX: {txHash.slice(0, 10)}...{txHash.slice(-8)}
+                </p>
               )}
-              {buyState === "confirmed" && (
-                <>
-                  <CheckCircle2 className="h-4 w-4" />
-                  Transaction confirmed
-                </>
+
+              {buyError && (
+                <p className="mt-2 text-center text-[11px] text-warning">
+                  {buyError}
+                </p>
               )}
-            </button>
-          </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

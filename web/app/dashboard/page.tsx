@@ -53,6 +53,7 @@ export default function Dashboard() {
   const [assets, setAssets] = useState<Collateral[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [attestedMap, setAttestedMap] = useState<Record<number, boolean>>({});
   const [showModal, setShowModal] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState<Collateral | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>("All");
@@ -69,6 +70,26 @@ export default function Dashboard() {
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (assets.length === 0) return;
+    Promise.all(
+      assets.map(async (a) => {
+        try {
+          const res = await fetch(`${API_BASE}/ai/attestations/${a.id}`);
+          if (!res.ok) return { id: a.id, attested: false };
+          const data = await res.json();
+          return { id: a.id, attested: data.some((att: any) => att.approved && !att.revoked) };
+        } catch {
+          return { id: a.id, attested: false };
+        }
+      })
+    ).then((results) => {
+      const map: Record<number, boolean> = {};
+      results.forEach((r) => { map[r.id] = r.attested; });
+      setAttestedMap(map);
+    });
+  }, [assets]);
 
   const colTypes = useMemo(() => {
     const types = new Set(assets.map((a) => a.colType));
@@ -212,6 +233,11 @@ export default function Dashboard() {
                           <span className={`text-[11px] font-medium ${statusColor[status]}`}>
                             {status}
                           </span>
+                          {attestedMap[asset.id] && (
+                            <span className="ml-2 rounded-full bg-success/10 px-2 py-0.5 text-[10px] font-medium text-success">
+                              Attested
+                            </span>
+                          )}
                         </div>
                       </div>
 

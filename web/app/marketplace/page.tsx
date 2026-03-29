@@ -1,179 +1,87 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import CollateralModal from "../components/CollateralModal";
 
-interface Listing {
-  id: string;
-  grade: string;
-  raise: string;
-  raiseNum: number;
-  shares: number;
-  pricePerShare: string;
-  ltv: string;
-  timeline: string;
-  yield: string;
-  issuer: string;
-  attestedAgo: string;
-  currency: string;
-  valuation: string;
-  loan: string;
-  defaultDays: string;
-  legalStatus: string;
-  netProceeds: string;
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3000";
+
+interface PublicListing {
+  listingId: number;
+  token: string;
+  assetType: number;
+  tokenId: string;
+  amount: string;       // fractions remaining
+  price: string;        // ETH formatted price per fraction
+  priceWei: string;
+  active: boolean;
+  collateral?: {
+    bankName: string;
+    collateralId: string;
+    maxTokenCount: string;
+    totalValue: string;   // ETH
+    yieldBasisPoints: number;
+    filled: boolean;
+    fractionsSold: string;
+  };
 }
 
-const listings: Listing[] = [
-  {
-    id: "CLQ-0041",
-    grade: "A",
-    raise: "£800K",
-    raiseNum: 800000,
-    shares: 800,
-    pricePerShare: "£1,000",
-    ltv: "50%",
-    timeline: "60 days",
-    yield: "~25%",
-    issuer: "hsbc.rayls.eth",
-    attestedAgo: "2h ago",
-    currency: "£",
-    valuation: "£2,000,000",
-    loan: "£1,000,000",
-    defaultDays: "94",
-    legalStatus: "Enforcement commenced",
-    netProceeds: "£800,000",
-  },
-  {
-    id: "CLQ-0038",
-    grade: "A",
-    raise: "£1.7M",
-    raiseNum: 1700000,
-    shares: 1700,
-    pricePerShare: "£1,000",
-    ltv: "59%",
-    timeline: "45 days",
-    yield: "~18%",
-    issuer: "barclays.rayls.eth",
-    attestedAgo: "5h ago",
-    currency: "£",
-    valuation: "£4,100,000",
-    loan: "£2,400,000",
-    defaultDays: "121",
-    legalStatus: "LPA Receiver Appointed",
-    netProceeds: "£1,700,000",
-  },
-  {
-    id: "CLQ-0045",
-    grade: "B+",
-    raise: "£280K",
-    raiseNum: 280000,
-    shares: 280,
-    pricePerShare: "£1,000",
-    ltv: "55%",
-    timeline: "90 days",
-    yield: "~14%",
-    issuer: "lloyds.rayls.eth",
-    attestedAgo: "8h ago",
-    currency: "£",
-    valuation: "£620,000",
-    loan: "£340,000",
-    defaultDays: "103",
-    legalStatus: "Asset seizure filed",
-    netProceeds: "£280,000",
-  },
-  {
-    id: "CLQ-0039",
-    grade: "A",
-    raise: "R$1.2M",
-    raiseNum: 1200000,
-    shares: 1200,
-    pricePerShare: "R$1,000",
-    ltv: "48%",
-    timeline: "75 days",
-    yield: "~22%",
-    issuer: "bradesco.rayls.eth",
-    attestedAgo: "3h ago",
-    currency: "R$",
-    valuation: "R$2,500,000",
-    loan: "R$1,200,000",
-    defaultDays: "102",
-    legalStatus: "Judicial enforcement filed",
-    netProceeds: "R$1,200,000",
-  },
-  {
-    id: "CLQ-0033",
-    grade: "A",
-    raise: "£1.4M",
-    raiseNum: 1400000,
-    shares: 1400,
-    pricePerShare: "£1,000",
-    ltv: "56%",
-    timeline: "120 days",
-    yield: "~12%",
-    issuer: "natwest.rayls.eth",
-    attestedAgo: "1d ago",
-    currency: "£",
-    valuation: "£3,200,000",
-    loan: "£1,800,000",
-    defaultDays: "145",
-    legalStatus: "Possession order granted",
-    netProceeds: "£1,400,000",
-  },
-  {
-    id: "CLQ-0047",
-    grade: "B+",
-    raise: "£700K",
-    raiseNum: 700000,
-    shares: 700,
-    pricePerShare: "£1,000",
-    ltv: "53%",
-    timeline: "90 days",
-    yield: "~14%",
-    issuer: "lloyds.rayls.eth",
-    attestedAgo: "1d ago",
-    currency: "£",
-    valuation: "£1,500,000",
-    loan: "£800,000",
-    defaultDays: "67",
-    legalStatus: "Pending enforcement",
-    netProceeds: "£700,000",
-  },
-];
-
-const allGrades = ["A", "B+"];
+function formatETH(val: string): string {
+  const num = parseFloat(val);
+  if (num >= 1e6) return `${(num / 1e6).toFixed(1)}M ETH`;
+  if (num >= 1e3) return `${(num / 1e3).toFixed(0)}K ETH`;
+  if (num >= 1) return `${num.toFixed(2)} ETH`;
+  return `${num.toFixed(4)} ETH`;
+}
 
 export default function Marketplace() {
-  const [selected, setSelected] = useState<Listing | null>(null);
-  const [gradeFilter, setGradeFilter] = useState("All");
-  const [sortBy, setSortBy] = useState<"raiseNum" | "yield" | "timeline">("raiseNum");
+  const [listings, setListings] = useState<PublicListing[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [selected, setSelected] = useState<PublicListing | null>(null);
+  const [sortBy, setSortBy] = useState<"amount" | "price" | "yield">("amount");
+
+  useEffect(() => {
+    fetch(`${API_BASE}/investor/listings`)
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to fetch listings");
+        return r.json();
+      })
+      .then((data) => setListings(data))
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
 
   const filtered = useMemo(() => {
-    let result = [...listings];
-    if (gradeFilter !== "All") result = result.filter((l) => l.grade === gradeFilter);
+    let result = [...listings].filter((l) => l.active);
     result.sort((a, b) => {
-      if (sortBy === "raiseNum") return b.raiseNum - a.raiseNum;
-      if (sortBy === "yield") return parseFloat(b.yield) - parseFloat(a.yield);
-      return parseInt(a.timeline) - parseInt(b.timeline);
+      if (sortBy === "amount") return parseInt(b.amount) - parseInt(a.amount);
+      if (sortBy === "price") return parseFloat(b.price) - parseFloat(a.price);
+      // yield
+      const yA = a.collateral?.yieldBasisPoints || 0;
+      const yB = b.collateral?.yieldBasisPoints || 0;
+      return yB - yA;
     });
     return result;
-  }, [gradeFilter, sortBy]);
+  }, [listings, sortBy]);
 
-  const toModalData = (l: Listing) => ({
-    type: l.id,
+  const toModalData = (l: PublicListing) => ({
+    type: `Listing #${l.listingId}`,
     location: "Withheld",
-    grade: l.grade,
-    valuation: l.valuation,
-    loan: l.loan,
-    ltv: l.ltv,
-    defaultDays: l.defaultDays,
-    legalStatus: l.legalStatus,
-    timeline: `~${l.timeline}`,
-    netProceeds: l.netProceeds,
-    issuer: l.issuer,
-    attestedAgo: l.attestedAgo,
-    sharePrice: l.pricePerShare,
-    sharesAvailable: l.shares,
-    currency: l.currency,
+    grade: "-",
+    valuation: l.collateral ? formatETH(l.collateral.totalValue) : "-",
+    loan: "-",
+    ltv: "-",
+    defaultDays: "-",
+    legalStatus: l.collateral?.filled ? "Filled" : "Active",
+    timeline: "-",
+    netProceeds: "-",
+    issuer: l.collateral?.bankName || "Unknown",
+    attestedAgo: "-",
+    sharePrice: formatETH(l.price),
+    sharesAvailable: parseInt(l.amount),
+    currency: "",
+    listingId: l.listingId,
+    priceWei: l.priceWei,
   });
 
   return (
@@ -193,26 +101,13 @@ export default function Marketplace() {
         <div className="mx-auto w-full max-w-[1200px] border-t border-border px-8 py-6">
           <div className="flex items-center gap-3">
             <select
-              value={gradeFilter}
-              onChange={(e) => setGradeFilter(e.target.value)}
-              className="cursor-pointer rounded-lg border border-border bg-card px-3 py-2 text-[13px] text-foreground outline-none"
-            >
-              <option value="All">All grades</option>
-              {allGrades.map((g) => (
-                <option key={g} value={g}>
-                  Grade {g}
-                </option>
-              ))}
-            </select>
-
-            <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
               className="cursor-pointer rounded-lg border border-border bg-card px-3 py-2 text-[13px] text-foreground outline-none"
             >
-              <option value="raiseNum">Sort: raise amount</option>
+              <option value="amount">Sort: available fractions</option>
+              <option value="price">Sort: price per fraction</option>
               <option value="yield">Sort: yield</option>
-              <option value="timeline">Sort: timeline</option>
             </select>
 
             <span className="ml-auto text-[13px] text-muted">
@@ -223,100 +118,109 @@ export default function Marketplace() {
 
         {/* Listings */}
         <div className="mx-auto w-full max-w-[1200px] px-8 pb-16">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {filtered.map((listing) => (
-              <button
-                key={listing.id}
-                onClick={() => setSelected(listing)}
-                className="group cursor-pointer rounded-2xl bg-card p-6 text-left transition-colors hover:bg-card-warm/50"
-              >
-                {/* ID + Grade */}
-                <div className="mb-5 flex items-center justify-between">
-                  <span className="font-mono text-[12px] text-muted">
-                    {listing.id}
-                  </span>
-                  <span
-                    className={`font-mono text-[11px] font-medium ${
-                      listing.grade === "A" ? "text-success" : "text-accent"
-                    }`}
-                  >
-                    {listing.grade}
-                  </span>
-                </div>
-
-                {/* Raise — hero of the card */}
-                <p className="font-serif text-[32px] font-light tracking-tight text-foreground">
-                  {listing.raise}
-                </p>
-                <p className="mt-1 font-mono text-[11px] text-muted">
-                  {listing.shares.toLocaleString()} shares at{" "}
-                  {listing.pricePerShare}
-                </p>
-
-                {/* Key metrics */}
-                <div className="mt-6 grid grid-cols-3 gap-3 border-t border-border pt-4">
-                  <div>
-                    <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
-                      LTV
-                    </p>
-                    <p className="font-mono text-[14px] text-foreground">
-                      {listing.ltv}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
-                      Yield
-                    </p>
-                    <p className="font-mono text-[14px] text-foreground">
-                      {listing.yield}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
-                      Timeline
-                    </p>
-                    <p className="font-mono text-[14px] text-foreground">
-                      {listing.timeline}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Default + Legal */}
-                <div className="mt-3 grid grid-cols-2 gap-3">
-                  <div>
-                    <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
-                      Default
-                    </p>
-                    <p className="font-mono text-[13px] text-foreground">
-                      {listing.defaultDays}d
-                    </p>
-                  </div>
-                  <div>
-                    <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
-                      Valuation
-                    </p>
-                    <p className="font-mono text-[13px] text-foreground">
-                      {listing.valuation}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Issuer + attestation */}
-                <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
-                  <span className="font-mono text-[11px] text-muted">
-                    {listing.issuer}
-                  </span>
-                  <span className="text-[11px] text-muted-light">
-                    {listing.attestedAgo}
-                  </span>
-                </div>
-              </button>
-            ))}
-          </div>
-
-          {filtered.length === 0 && (
+          {loading && (
             <div className="py-16 text-center text-[14px] text-muted">
-              No listings match the selected filters.
+              Loading listings from public chain...
+            </div>
+          )}
+
+          {error && (
+            <div className="py-16 text-center text-[14px] text-accent">
+              Failed to load: {error}. Make sure the backend is running.
+            </div>
+          )}
+
+          {!loading && !error && (
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              {filtered.map((listing) => (
+                <button
+                  key={listing.listingId}
+                  onClick={() => setSelected(listing)}
+                  className="group cursor-pointer rounded-2xl bg-card p-6 text-left transition-colors hover:bg-card-warm/50"
+                >
+                  {/* ID + type */}
+                  <div className="mb-5 flex items-center justify-between">
+                    <span className="font-mono text-[12px] text-muted">
+                      Listing #{listing.listingId}
+                    </span>
+                    <span className="font-mono text-[11px] font-medium text-success">
+                      {listing.assetType === 2 ? "ERC-1155" : listing.assetType === 1 ? "ERC-721" : "ERC-20"}
+                    </span>
+                  </div>
+
+                  {/* Total value — hero */}
+                  {listing.collateral ? (
+                    <>
+                      <p className="font-serif text-[32px] font-light tracking-tight text-foreground">
+                        {formatETH(listing.collateral.totalValue)}
+                      </p>
+                      <p className="mt-1 font-mono text-[11px] text-muted">
+                        {parseInt(listing.amount).toLocaleString()} fractions at {formatETH(listing.price)} each
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-serif text-[32px] font-light tracking-tight text-foreground">
+                        {formatETH(listing.price)}
+                      </p>
+                      <p className="mt-1 font-mono text-[11px] text-muted">
+                        {parseInt(listing.amount).toLocaleString()} available
+                      </p>
+                    </>
+                  )}
+
+                  {/* Key metrics — public data only */}
+                  {listing.collateral && (
+                    <div className="mt-6 grid grid-cols-3 gap-3 border-t border-border pt-4">
+                      <div>
+                        <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
+                          Yield
+                        </p>
+                        <p className="font-mono text-[14px] text-foreground">
+                          {listing.collateral.yieldBasisPoints / 100}%
+                        </p>
+                      </div>
+                      <div>
+                        <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
+                          Fractions
+                        </p>
+                        <p className="font-mono text-[14px] text-foreground">
+                          {listing.collateral.maxTokenCount}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="font-mono text-[9px] tracking-[0.15em] text-muted uppercase">
+                          Sold
+                        </p>
+                        <p className="font-mono text-[14px] text-foreground">
+                          {listing.collateral.fractionsSold}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Status */}
+                  <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
+                    <span className="font-mono text-[11px] text-muted">
+                      {listing.collateral?.bankName || "Token"}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`h-1.5 w-1.5 rounded-full ${listing.collateral?.filled ? "bg-muted" : "bg-success"}`} />
+                      <span className={`text-[11px] font-medium ${listing.collateral?.filled ? "text-muted" : "text-success"}`}>
+                        {listing.collateral?.filled ? "Filled" : "Active"}
+                      </span>
+                    </div>
+                  </div>
+                </button>
+              ))}
+
+              {filtered.length === 0 && !loading && (
+                <div className="col-span-3 py-16 text-center text-[14px] text-muted">
+                  {listings.length === 0
+                    ? "No active listings on the public marketplace."
+                    : "No listings match the selected filters."}
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -325,9 +229,9 @@ export default function Marketplace() {
         <div className="border-t border-border">
           <div className="mx-auto w-full max-w-[1200px] px-8 py-10">
             <p className="text-[13px] leading-relaxed text-muted">
-              All listings AI-attested on Rayls. Asset type, location, and
-              borrower identity withheld. Only financial metrics, legal status,
-              and verified issuer are disclosed. Settlement via atomic DvP.
+              All data sourced from Rayls Public L1. No private borrower data is
+              exposed. Only tokenization metrics, yield, and bank issuer are
+              disclosed. Fractions are ERC-1155 tokens tradeable on-chain.
             </p>
           </div>
         </div>
